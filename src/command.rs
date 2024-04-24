@@ -197,7 +197,7 @@ pub mod register {
         #[derive(Debug, Clone, Copy)]
         #[repr(u8)]
         pub enum DeviceID {
-            QSTSensor = 0x05,
+            QST = 0x05,
             Unknown,
         }
 

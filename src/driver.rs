@@ -82,7 +82,7 @@ where
         self.interface
             .write_read(self.addr.into(), &[WHO_AM_I], &mut buffer)?;
         let value = match buffer[0] {
-            0x05 => DeviceID::QSTSensor,
+            0x05 => DeviceID::QST,
             _ => DeviceID::Unknown,
         };
 
