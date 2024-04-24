@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 /// Device Identifier Register (R)
 /// Default:  00000101
 pub const WHO_AM_I: u8 = 0x00;
