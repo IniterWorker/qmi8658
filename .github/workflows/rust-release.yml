@@ -1,0 +1,40 @@
+on:
+  push:
+    # Pattern matched against refs/tags
+    tags:        
+      - '*'           # Push events to every tag not containing /
+  workflow_dispatch:
+
+name: Rust Release
+
+jobs:
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: clippy, rustfmt
+          targets: thumbv7em-none-eabihf
+
+      - name: Build
+        run: cargo build --all-targets --verbose
+
+      - name: Format with Fmt
+        run: cargo fmt --all -- --check --color always
+
+      - name: Lint with Clippy
+        run: cargo clippy --all-targets --all-features --workspace -- -D warnings
+
+      - name: Run Tests
+        run: cargo test --verbose
+
+      - run: cargo publish --token ${CRATES_TOKEN}
+        env:
+          CRATES_TOKEN: ${{ secrets.CRATES_TOKEN }}

@@ -1,0 +1,43 @@
+name: Continuous Integration
+
+on:
+  push:
+    paths-ignore:
+      - "**/README.md"
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Driver
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        action:
+          - command: build
+            args: --release
+          - command: fmt
+            args: --all -- --check --color always
+          - command: clippy
+            args: --all-targets --all-features --workspace -- -D warnings
+          - command: test
+            args: --verbose
+
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: clippy, rustfmt
+          targets: thumbv7em-none-eabihf
+
+      - name: Enable caching
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run command
+        run: cargo ${{ matrix.action.command }} ${{ matrix.action.args }}
+

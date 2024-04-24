@@ -1,0 +1,33 @@
+[package]
+name = "qmi8658"
+categories = ["embedded", "no-std"]
+version = "0.2.1"
+edition = "2021"
+authors = [
+    "Walter Bonetti <walter.bonetti@epitech.eu>"
+]
+license = "MIT OR Apache-2.0"
+description = "QMI8658 Sensor/Gyroscope"
+keywords = ["no-std", "qmi8658", "embedded", "embedded-hal-driver", "sensor"]
+include = ["src/**/*.rs", "crates-io.md", "README.md", "LICENSE-APACHE", "LICENSE-MIT"]
+repository = "https://github.com/IniterWorker/qmi8658"
+readme = "README.md"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package.metadata.docs.rs]
+targets = [ "thumbv7m-none-eabi", "thumbv7em-none-eabihf" ]
+
+[dependencies]
+# Embedded HAL abstraction
+# We use this layer to abstract hardware i2c/spi
+embedded-hal = { version = "1.0.0" }
+bitfield = "0.15.0"
+
+[dev-dependencies.cargo-husky]
+version = "1"
+features = ["user-hooks"]
+
+[lib]
+name = "qmi8658"
+path = "src/lib.rs"
