@@ -667,7 +667,7 @@ pub mod register {
     pub mod fifo_wtm_th {
 
         /// Number of ODRs(Samples) needed to trigger FIFO watermark
-        pub struct FIFOWTMRegister(u8);
+        pub type FIFOWTMRegister = u8;
     }
 
     pub mod fifo_ctrl {
@@ -881,10 +881,10 @@ pub mod register {
         //!
 
         /// Time Stamp Register Size
-        pub struct TimeStampRegister(u8);
+        pub type TimeStampRegister = u8;
 
         /// Sample Time Stamp
-        pub struct SampleTimeStamp(u32);
+        pub type SampleTimeStamp = u32;
     }
 
     pub mod temp {
@@ -892,18 +892,18 @@ pub mod register {
         //! T = `TEMP_H` + (`TEMP_L` / 256)
 
         /// Temperature Register Size
-        pub struct TempRegister(u8);
+        pub type TempRegister = u8;
 
         /// Temperature Sensor Register Address: 0x33 – 0x34
-        pub struct Temperature(u16);
+        pub type Temperature = u16;
     }
 
     pub mod acceleration {
         /// Acceleration Register Size
-        pub struct AccelerationRegister(u8);
+        pub type AccelerationRegister = u8;
 
         /// Angular Register Size
-        pub struct AngularRegister(u8);
+        pub type AngularRegister = u8;
 
         /// Acceleration Output. Register Address: 0x35 – 0x3A
         pub struct AccelerationOutput {
@@ -1025,15 +1025,15 @@ pub mod register {
     pub mod step_count {
 
         /// Step Count Register Size
-        pub struct StepCountRegister(u8);
+        pub type StepCountRegister = u8;
 
         /// 24 `BitCounter`
-        pub struct StepCounter(u32);
+        pub type StepCounter = u32;
     }
 
     pub mod reset {
 
         /// Reset Register
-        pub struct ResetRegister(u8);
+        pub type ResetRegister = u8;
     }
 }
