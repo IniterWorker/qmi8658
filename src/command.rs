@@ -1,195 +1,199 @@
 #![allow(dead_code)]
 
-/// Device Identifier Register (R)
-/// Default:  00000101
-pub const WHO_AM_I: u8 = 0x00;
-/// Device Revision ID Register (R)
-/// Default:  01101000
-pub const REVISION_ID: u8 = 0x01;
-/// SPI Interface and Sensor Enable Register (W)
-/// Default:  00100000
-pub const CTRL1: u8 = 0x02;
-/// Accelerometer: Output Data Rate, Full Scale, Self-Test Register (W)
-/// Default:  00000000
-pub const CTRL2: u8 = 0x03;
-/// Gyroscope: Output Data Rate, Full Scale, Self-Test Register (W)
-/// Default:  00000000
-pub const CTRL3: u8 = 0x04;
-/// Reserved Register (W)
-/// Default:  00000000
-pub const RESERVED_U1: u8 = 0x05;
-/// Low pass filter setting Register (W)
-/// Default:  00000000
-pub const CTRL5: u8 = 0x06;
-/// Reserved Register (W)
-/// Default:  00000000
-pub const RESERVED_U2: u8 = 0x07;
-/// Enable Sensors Register (W)
-/// Default:  00000000
-pub const CTRL7: u8 = 0x08;
-/// Motion Detection Control Register (W)
-/// Default:  00000000
-pub const CTRL8: u8 = 0x09;
-/// Host Commands Host Controlled Calibration Registers (See CTRL9, Usage is Optional) Register (W)
-/// Default:  00000000
-pub const CTRL9: u8 = 0x0A;
-/// Calibration Low Register Register (RW)
-/// Default:  00000000
-pub const CAL1_LOW: u8 = 0x0B;
-/// Calibration High Register Register (RW)
-/// Default: 00000000
-pub const CAL1_HIGH: u8 = 0x0C;
-/// Calibration Low Register Register (RW)
-/// Default:  00000000
-pub const CAL2_LOW: u8 = 0x0D;
-/// Calibration High Register Register (RW)
-/// Default: 00000000
-pub const CAL2_HIGH: u8 = 0x0E;
-/// Calibration Low Register Register (RW)
-/// Default:  00000000
-pub const CAL3_LOW: u8 = 0x0F;
-/// Calibration High Register Register (RW)
-/// Default: 00000000
-pub const CAL3_HIGH: u8 = 0x10;
-/// Calibration Low Register Register (RW)
-/// Default:  00000000
-pub const CAL4_LOW: u8 = 0x11;
-/// Calibration High Register Register (RW)
-/// Default: 00000000
-pub const CAL4_HIGH: u8 = 0x12;
-/// FIFO watermark level, in ODRs Register (W)
-/// Default:  00000000
-pub const FIFO_WTM_TH: u8 = 0x13;
-/// FIFO Setup Register (W)
-/// Default:  00000000
-pub const FIFO_CTRL: u8 = 0x14;
-/// FIFO sample count LSBs Register (R)
-/// Default:  00000000
-pub const FIFO_SMPL_CNT: u8 = 0x15;
-/// FIFO Status Register (R)
-/// Default:  00000000
-pub const FIFO_STATUS: u8 = 0x16;
-/// FIFO Data Status Registers Register (R)
-/// Default:  00000000
-pub const FIFO_DATA: u8 = 0x17;
-/// Sensor Data Availability with the Locking mechanism, `CmdDone` (CTRL9 protocol bit). Register (R)
-/// Default:  00000000
-pub const STATUSINT: u8 = 0x2D;
-/// Output Data Over Run and Data Availability. Register (R)
-/// Default:  00000000
-pub const STATUS0: u8 = 0x2E;
-/// Miscellaneous Status: Any Motion, No Motion, Significant Motion, Pedometer, Tap. Timestamp Register Register (R)
-/// Default:  00000000
-pub const STATUS1: u8 = 0x2F;
-/// Sample Time Stamp Register (R)
-/// Default:  00000000
-pub const TIMESTAMP_LOW: u8 = 0x30;
-/// Register (R)
-/// Default:  00000000
-pub const TIMESTAMP_MID: u8 = 0x31;
-///  Register (R)
-/// Default:  00000000
-pub const TIMESTAMP_HIGH: u8 = 0x32;
-/// Temperature Output Data Register (R)
-/// Default:  00000000
-pub const TEMP_LOW: u8 = 0x33;
-/// `TEMP_LOW` – Low 8 bits. `TEMP_HIGH` – upper 8 bits Register (R)
-/// Default:  00000000
-pub const TEMP_HIGH: u8 = 0x34;
-/// X-axis Acceleration Low Register (R)
-/// Default:  00000000
-pub const AX_LOW: u8 = 0x35;
-/// X-axis Acceleration High Register (R)
-/// Default:  00000000
-pub const AX_HIGH: u8 = 0x36;
-/// Y-axis Acceleration Low Register (R)
-/// Default:  00000000
-pub const AY_LOW: u8 = 0x37;
-/// Y-axis Acceleration High Register (R)
-/// Default:  00000000
-pub const AY_HIGH: u8 = 0x38;
-/// Z-axis Acceleration Low Register (R)
-/// Default:  00000000
-pub const AZ_LOW: u8 = 0x39;
-/// Z-axis Acceleration High Register (R)
-/// Default:  00000000
-pub const AZ_HIGH: u8 = 0x3A;
-/// X-axis Angular Rate Low Register (R)
-/// Default:  00000000
-pub const GX_LOW: u8 = 0x3B;
-/// X-axis Angular Rate High Register (R)
-/// Default:  00000000
-pub const GX_HIGH: u8 = 0x3C;
-/// Y-axis Angular Rate Low Register (R)
-/// Default:  00000000
-pub const GY_LOW: u8 = 0x3D;
-/// Z-axis Angular Rate High Register (R)
-/// Default:  00000000
-pub const GY_HIGH: u8 = 0x3E;
-/// Z-axis Angular Rate Low Register (R)
-/// Default:  00000000
-pub const GZ_LOW: u8 = 0x3F;
-/// Calibration-On-Demand status register Register (R)
-/// Default:  00000000
-pub const COD_STATUS: u8 = 0x46;
-/// General purpose register Register (R)
-/// Default:  00000000
-pub const D_QW_LOW: u8 = 0x49;
-/// General purpose register Register (R)
-/// Default:  00000000
-pub const D_QW_HIGH: u8 = 0x4A;
-/// General purpose register Register (R)
-/// Default:  00000000
-pub const D_QX_LOW: u8 = 0x4B;
-/// Reserved Register (R)
-/// Default:  00000000
-pub const D_QX_HIGH: u8 = 0x4C;
-/// General purpose register Register (R)
-/// Default:  00000000
-pub const D_QY_LOW: u8 = 0x4D;
-/// Reserved Register (R)
-/// Default:  00000000
-pub const D_QY_HIGH: u8 = 0x4E;
-/// Reserved Register (R)
-/// Default:  00000000
-pub const D_QZ_LOW: u8 = 0x4F;
-/// Reserved Register (R)
-/// Default:  00000000
-pub const D_QZ_HIGH: u8 = 0x50;
-/// General purpose register Register (R)
-/// Default:  00000000
-pub const D_VX_LOW: u8 = 0x51;
-/// General purpose register Register (R)
-/// Default:  00000000
-pub const D_VX_HIGH: u8 = 0x52;
-/// General purpose register Register (R)
-/// Default:  00000000
-pub const D_VY_LOW: u8 = 0x53;
-/// General purpose register Register (R)
-/// Default:  00000000
-pub const D_VY_HIGH: u8 = 0x54;
-/// General purpose register Register (R)
-/// Default:  00000000
-pub const D_VZ_LOW: u8 = 0x55;
-/// General purpose register Register (R)
-/// Default:  00000000
-pub const D_VZ_HIGH: u8 = 0x56;
-/// Axis, direction, number of detected Tap Register (R)
-/// Default:  00000000
-pub const TAP_STATUS: u8 = 0x59;
-/// Low byte of step count of Pedometer Register (R)
-/// Default:  00000000
-pub const STEP_CNT_LOWOW: u8 = 0x5A;
-/// Middle byte of step count of Pedometer Register (R)
-/// Default:  00000000
-pub const STEP_CNT_MIDL: u8 = 0x5B;
-/// High byte of step count of Pedometer Register (R)
-/// Default:  00000000
-pub const STEP_CNT_HIGHIGH: u8 = 0x5C;
-/// Soft Reset Register Register (W)
-/// Default:  00000000
-pub const RESET: u8 = 0x60;
-
+pub mod constants {
+    /// Device Identifier Register (R)
+    /// Default:  00000101
+    pub const WHO_AM_I: u8 = 0x00;
+    /// Device Revision ID Register (R)
+    /// Default:  01101000
+    pub const REVISION_ID: u8 = 0x01;
+    /// SPI Interface and Sensor Enable Register (W)
+    /// Default:  00100000
+    pub const CTRL1: u8 = 0x02;
+    /// Accelerometer: Output Data Rate, Full Scale, Self-Test Register (W)
+    /// Default:  00000000
+    pub const CTRL2: u8 = 0x03;
+    /// Gyroscope: Output Data Rate, Full Scale, Self-Test Register (W)
+    /// Default:  00000000
+    pub const CTRL3: u8 = 0x04;
+    /// Reserved Register (W)
+    /// Default:  00000000
+    pub const RESERVED_U1: u8 = 0x05;
+    /// Low pass filter setting Register (W)
+    /// Default:  00000000
+    pub const CTRL5: u8 = 0x06;
+    /// Reserved Register (W)
+    /// Default:  00000000
+    pub const RESERVED_U2: u8 = 0x07;
+    /// Enable Sensors Register (W)
+    /// Default:  00000000
+    pub const CTRL7: u8 = 0x08;
+    /// Motion Detection Control Register (W)
+    /// Default:  00000000
+    pub const CTRL8: u8 = 0x09;
+    /// Host Commands Host Controlled Calibration Registers (See CTRL9, Usage is Optional) Register (W)
+    /// Default:  00000000
+    pub const CTRL9: u8 = 0x0A;
+    /// Calibration Low Register Register (RW)
+    /// Default:  00000000
+    pub const CAL1_LOW: u8 = 0x0B;
+    /// Calibration High Register Register (RW)
+    /// Default: 00000000
+    pub const CAL1_HIGH: u8 = 0x0C;
+    /// Calibration Low Register Register (RW)
+    /// Default:  00000000
+    pub const CAL2_LOW: u8 = 0x0D;
+    /// Calibration High Register Register (RW)
+    /// Default: 00000000
+    pub const CAL2_HIGH: u8 = 0x0E;
+    /// Calibration Low Register Register (RW)
+    /// Default:  00000000
+    pub const CAL3_LOW: u8 = 0x0F;
+    /// Calibration High Register Register (RW)
+    /// Default: 00000000
+    pub const CAL3_HIGH: u8 = 0x10;
+    /// Calibration Low Register Register (RW)
+    /// Default:  00000000
+    pub const CAL4_LOW: u8 = 0x11;
+    /// Calibration High Register Register (RW)
+    /// Default: 00000000
+    pub const CAL4_HIGH: u8 = 0x12;
+    /// FIFO watermark level, in ODRs Register (W)
+    /// Default:  00000000
+    pub const FIFO_WTM_TH: u8 = 0x13;
+    /// FIFO Setup Register (W)
+    /// Default:  00000000
+    pub const FIFO_CTRL: u8 = 0x14;
+    /// FIFO sample count LSBs Register (R)
+    /// Default:  00000000
+    pub const FIFO_SMPL_CNT: u8 = 0x15;
+    /// FIFO Status Register (R)
+    /// Default:  00000000
+    pub const FIFO_STATUS: u8 = 0x16;
+    /// FIFO Data Status Registers Register (R)
+    /// Default:  00000000
+    pub const FIFO_DATA: u8 = 0x17;
+    /// Sensor Data Availability with the Locking mechanism, `CmdDone` (CTRL9 protocol bit). Register (R)
+    /// Default:  00000000
+    pub const STATUSINT: u8 = 0x2D;
+    /// Output Data Over Run and Data Availability. Register (R)
+    /// Default:  00000000
+    pub const STATUS0: u8 = 0x2E;
+    /// Miscellaneous Status: Any Motion, No Motion, Significant Motion, Pedometer, Tap. Timestamp Register Register (R)
+    /// Default:  00000000
+    pub const STATUS1: u8 = 0x2F;
+    /// Sample Time Stamp Register (R)
+    /// Default:  00000000
+    pub const TIMESTAMP_LOW: u8 = 0x30;
+    /// Register (R)
+    /// Default:  00000000
+    pub const TIMESTAMP_MID: u8 = 0x31;
+    ///  Register (R)
+    /// Default:  00000000
+    pub const TIMESTAMP_HIGH: u8 = 0x32;
+    /// Temperature Output Data Register (R)
+    /// Default:  00000000
+    pub const TEMP_LOW: u8 = 0x33;
+    /// `TEMP_LOW` – Low 8 bits. `TEMP_HIGH` – upper 8 bits Register (R)
+    /// Default:  00000000
+    pub const TEMP_HIGH: u8 = 0x34;
+    /// X-axis Acceleration Low Register (R)
+    /// Default:  00000000
+    pub const AX_LOW: u8 = 0x35;
+    /// X-axis Acceleration High Register (R)
+    /// Default:  00000000
+    pub const AX_HIGH: u8 = 0x36;
+    /// Y-axis Acceleration Low Register (R)
+    /// Default:  00000000
+    pub const AY_LOW: u8 = 0x37;
+    /// Y-axis Acceleration High Register (R)
+    /// Default:  00000000
+    pub const AY_HIGH: u8 = 0x38;
+    /// Z-axis Acceleration Low Register (R)
+    /// Default:  00000000
+    pub const AZ_LOW: u8 = 0x39;
+    /// Z-axis Acceleration High Register (R)
+    /// Default:  00000000
+    pub const AZ_HIGH: u8 = 0x3A;
+    /// X-axis Angular Rate Low Register (R)
+    /// Default:  00000000
+    pub const GX_LOW: u8 = 0x3B;
+    /// X-axis Angular Rate High Register (R)
+    /// Default:  00000000
+    pub const GX_HIGH: u8 = 0x3C;
+    /// Y-axis Angular Rate Low Register (R)
+    /// Default:  00000000
+    pub const GY_LOW: u8 = 0x3D;
+    /// Z-axis Angular Rate High Register (R)
+    /// Default:  00000000
+    pub const GY_HIGH: u8 = 0x3E;
+    /// Z-axis Angular Rate Low Register (R)
+    /// Default:  00000000
+    pub const GZ_LOW: u8 = 0x3F;
+    /// Z-axis Angular Rate High Register (R)
+    /// Default:  00000000
+    pub const GZ_HIGH: u8 = 0x40;
+    /// Calibration-On-Demand status register Register (R)
+    /// Default:  00000000
+    pub const COD_STATUS: u8 = 0x46;
+    /// General purpose register Register (R)
+    /// Default:  00000000
+    pub const D_QW_LOW: u8 = 0x49;
+    /// General purpose register Register (R)
+    /// Default:  00000000
+    pub const D_QW_HIGH: u8 = 0x4A;
+    /// General purpose register Register (R)
+    /// Default:  00000000
+    pub const D_QX_LOW: u8 = 0x4B;
+    /// Reserved Register (R)
+    /// Default:  00000000
+    pub const D_QX_HIGH: u8 = 0x4C;
+    /// General purpose register Register (R)
+    /// Default:  00000000
+    pub const D_QY_LOW: u8 = 0x4D;
+    /// Reserved Register (R)
+    /// Default:  00000000
+    pub const D_QY_HIGH: u8 = 0x4E;
+    /// Reserved Register (R)
+    /// Default:  00000000
+    pub const D_QZ_LOW: u8 = 0x4F;
+    /// Reserved Register (R)
+    /// Default:  00000000
+    pub const D_QZ_HIGH: u8 = 0x50;
+    /// General purpose register Register (R)
+    /// Default:  00000000
+    pub const D_VX_LOW: u8 = 0x51;
+    /// General purpose register Register (R)
+    /// Default:  00000000
+    pub const D_VX_HIGH: u8 = 0x52;
+    /// General purpose register Register (R)
+    /// Default:  00000000
+    pub const D_VY_LOW: u8 = 0x53;
+    /// General purpose register Register (R)
+    /// Default:  00000000
+    pub const D_VY_HIGH: u8 = 0x54;
+    /// General purpose register Register (R)
+    /// Default:  00000000
+    pub const D_VZ_LOW: u8 = 0x55;
+    /// General purpose register Register (R)
+    /// Default:  00000000
+    pub const D_VZ_HIGH: u8 = 0x56;
+    /// Axis, direction, number of detected Tap Register (R)
+    /// Default:  00000000
+    pub const TAP_STATUS: u8 = 0x59;
+    /// Low byte of step count of Pedometer Register (R)
+    /// Default:  00000000
+    pub const STEP_CNT_LOW: u8 = 0x5A;
+    /// Middle byte of step count of Pedometer Register (R)
+    /// Default:  00000000
+    pub const STEP_CNT_MID: u8 = 0x5B;
+    /// High byte of step count of Pedometer Register (R)
+    /// Default:  00000000
+    pub const STEP_CNT_HIGH: u8 = 0x5C;
+    /// Soft Reset Register Register (W)
+    /// Default:  00000000
+    pub const RESET: u8 = 0x60;
+}
 pub mod register {
     pub mod ship_info {
 
@@ -902,27 +906,35 @@ pub mod register {
         /// Acceleration Register Size
         pub type AccelerationRegister = u8;
 
+        /// Acceleration Register Size
+        pub type AccelerationFullRegister = u16;
+
         /// Angular Register Size
         pub type AngularRegister = u8;
 
+        /// Angular Register Size
+        pub type AngularFullRegister = u16;
+
         /// Acceleration Output. Register Address: 0x35 – 0x3A
+        #[derive(Debug, PartialEq, Eq, Clone, Copy)]
         pub struct AccelerationOutput {
             /// AX
-            pub x: u16,
+            pub x: AccelerationFullRegister,
             /// AY
-            pub y: u16,
+            pub y: AccelerationFullRegister,
             /// AZ
-            pub z: u16,
+            pub z: AccelerationFullRegister,
         }
 
         /// Angular Rate Output. Register Address: 0x3B – 0x40
+        #[derive(Debug, PartialEq, Eq, Clone, Copy)]
         pub struct AngularRateOutput {
             /// AX
-            pub x: u16,
+            pub x: AngularFullRegister,
             /// AY
-            pub y: u16,
+            pub y: AngularFullRegister,
             /// AZ
-            pub z: u16,
+            pub z: AngularFullRegister,
         }
     }
 
