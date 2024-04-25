@@ -228,35 +228,62 @@ pub mod register {
 
         use crate::define_enum_with_bitrange;
 
-        define_enum_with_bitrange!(Afs {
+        define_enum_with_bitrange!(AccelerometerFS {
             /// Accelerometer Full-scale = ±2 g
-            AFS2G = 0b000,
+            FS2G = 0b000,
             /// Accelerometer Full-scale = ±4 g
-            AFS4G = 0b001,
+            FS4G = 0b001,
             /// Accelerometer Full-scale = ±8 g
-            AFS8G = 0b010,
+            FS8G = 0b010,
             /// Accelerometer Full-scale = ±16 g
-            AFS16G = 0b011,
+            FS16G = 0b011,
         });
 
-        define_enum_with_bitrange!(Aodr {
-            /// N/A 7174.4 Hz, Normal, 100%
+        define_enum_with_bitrange!(AccelerometerODR {
+            /// ODR Rate (Hz): (Accel only) N/A
+            /// ODR Rate (Hz) (6DOF)(13): 7174.4 Hz
+            /// Mode: Normal
+            /// Duty Cycle: 100%
             NormalAODR0 = 0b0000,
-            /// N/A 3587.2 Hz, Normal, 100%
+            /// ODR Rate (Hz): (Accel only) N/A
+            /// ODR Rate (Hz) (6DOF)(13): 3587.2 Hz
+            /// Mode: Normal
+            /// Duty Cycle: 100%
             NormalAODR1 = 0b0001,
-            /// N/A 1793.6 Hz, Normal, 100%
+            /// ODR Rate (Hz): (Accel only) N/A
+            /// ODR Rate (Hz) (6DOF)(13): 1793.6
+            /// Mode: Normal
+            /// Duty Cycle: 100%
             NormalAODR2 = 0b0010,
-            /// 1000 896.8 Hz, Normal, 100%
+            /// ODR Rate (Hz): (Accel only): 1000
+            /// ODR Rate (Hz) (6DOF)(13): 896.8
+            /// Mode: Normal
+            /// Duty Cycle: 100%
             NormalAODR3 = 0b0011,
-            /// 500 448.4  Hz, Normal, 100%
+            /// ODR Rate (Hz): (Accel only): 500
+            /// ODR Rate (Hz) (6DOF)(13): 448.4
+            /// Mode: Normal
+            /// Duty Cycle: 100%
             NormalAODR4 = 0b0100,
-            /// 250 224.2 Hz, Normal, 100%
+            /// ODR Rate (Hz): (Accel only): 250
+            /// ODR Rate (Hz) (6DOF)(13): 224.2
+            /// Mode: Normal
+            /// Duty Cycle: 100%
             NormalAODR5 = 0b0101,
-            /// 125 112.1 Hz, Normal, 100%
+            /// ODR Rate (Hz): (Accel only): 125
+            /// ODR Rate (Hz) (6DOF)(13): 112.1
+            /// Mode: Normal
+            /// Duty Cycle: 100%
             NormalAODR6 = 0b0110,
-            /// 62.5 56.05  Hz, Normal, 100%
+            /// ODR Rate (Hz): (Accel only): 62
+            /// ODR Rate (Hz) (6DOF)(13): 56.05
+            /// Mode: Normal
+            /// Duty Cycle: 100%
             NormalAODR7 = 0b0111,
-            /// 31.25 28.025 Hz, Normal, 100%
+            /// ODR Rate (Hz): (Accel only): 31
+            /// ODR Rate (Hz) (6DOF)(13): 28.025
+            /// Mode: Normal
+            /// Duty Cycle: 100%
             NormalAODR8 = 0b1000,
             /// N/A
             ReservedAODR9 = 0b1001,
@@ -264,13 +291,25 @@ pub mod register {
             ReservedAODR10 = 0b1010,
             /// N/A
             ReservedAODR11 = 0b1011,
-            /// Low Power, 100%
+            /// ODR Rate (Hz): (Accel only): 128
+            /// ODR Rate (Hz) (6DOF)(13): N/A
+            /// Mode: Low Power
+            /// Duty Cycle: 100%
             LowPowerAODR12 = 0b1100,
-            /// Low Power, 58%
+            /// ODR Rate (Hz): (Accel only): 128
+            /// ODR Rate (Hz) (6DOF)(13): N/A
+            /// Mode: Low Power
+            /// Duty Cycle: 58%
             LowPowerAODR13 = 0b1101,
-            /// Low Power, 31%
+            /// ODR Rate (Hz): (Accel only): 128
+            /// ODR Rate (Hz) (6DOF)(13): N/A
+            /// Mode: Low Power
+            /// Duty Cycle: 31%
             LowPowerAODR14 = 0b1110,
-            /// Low Power, 8.5%
+            /// ODR Rate (Hz): (Accel only): 128
+            /// ODR Rate (Hz) (6DOF)(13): N/A
+            /// Mode: Low Power
+            /// Duty Cycle: 8.5
             LowPowerAODR15 = 0b1111,
         });
 
@@ -280,17 +319,17 @@ pub mod register {
             impl Debug;
             bool, ast, set_ast: 7;
             #[doc = "Set Accelerometer Full-scale"]
-            Afs, afs, set_afs: 6, 4;
+            AccelerometerFS, afs, set_afs: 6, 4;
             #[doc = "Set Accelerometer Output Data Rate (ODR)"]
-            Aodr, aodr, set_aodr: 3, 0;
+            AccelerometerODR, aodr, set_aodr: 3, 0;
         }
 
         #[cfg(test)]
         mod test {
             use bitfield::{BitRange, BitRangeMut};
 
-            use super::Afs;
-            use super::Aodr;
+            use super::AccelerometerFS;
+            use super::AccelerometerODR;
             use super::Ctrl2Register;
 
             #[test]
@@ -298,29 +337,29 @@ pub mod register {
                 // Test AFS2G
                 let value_2g: u8 = 0b0000_0000;
                 assert_eq!(
-                    <u8 as BitRange<Afs>>::bit_range(&value_2g, 2, 0),
-                    Afs::AFS2G
+                    <u8 as BitRange<AccelerometerFS>>::bit_range(&value_2g, 2, 0),
+                    AccelerometerFS::FS2G
                 );
 
                 // Test AFS4G
                 let value_4g: u8 = 0b0000_0001;
                 assert_eq!(
-                    <u8 as BitRange<Afs>>::bit_range(&value_4g, 2, 0),
-                    Afs::AFS4G
+                    <u8 as BitRange<AccelerometerFS>>::bit_range(&value_4g, 2, 0),
+                    AccelerometerFS::FS4G
                 );
 
                 // Test AFS8G
                 let value_8g: u8 = 0b0000_0010;
                 assert_eq!(
-                    <u8 as BitRange<Afs>>::bit_range(&value_8g, 2, 0),
-                    Afs::AFS8G
+                    <u8 as BitRange<AccelerometerFS>>::bit_range(&value_8g, 2, 0),
+                    AccelerometerFS::FS8G
                 );
 
                 // Test AFS16G
                 let value_16g: u8 = 0b0000_0011;
                 assert_eq!(
-                    <u8 as BitRange<Afs>>::bit_range(&value_16g, 2, 0),
-                    Afs::AFS16G
+                    <u8 as BitRange<AccelerometerFS>>::bit_range(&value_16g, 2, 0),
+                    AccelerometerFS::FS16G
                 );
             }
 
@@ -329,19 +368,19 @@ pub mod register {
                 let mut value: u8 = 0;
 
                 // Set AFS2G
-                value.set_bit_range(2, 0, Afs::AFS2G);
+                value.set_bit_range(2, 0, AccelerometerFS::FS2G);
                 assert_eq!(value, 0b0000_0000);
 
                 // Set AFS4G
-                value.set_bit_range(2, 0, Afs::AFS4G);
+                value.set_bit_range(2, 0, AccelerometerFS::FS4G);
                 assert_eq!(value, 0b0000_0001);
 
                 // Set AFS8G
-                value.set_bit_range(2, 0, Afs::AFS8G);
+                value.set_bit_range(2, 0, AccelerometerFS::FS8G);
                 assert_eq!(value, 0b0000_0010);
 
                 // Set AFS16G
-                value.set_bit_range(2, 0, Afs::AFS16G);
+                value.set_bit_range(2, 0, AccelerometerFS::FS16G);
                 assert_eq!(value, 0b0000_0011);
             }
 
@@ -351,8 +390,8 @@ pub mod register {
 
                 let data = Ctrl2Register(register);
                 assert!(data.ast());
-                assert_eq!(data.afs(), Afs::AFS2G);
-                assert_eq!(data.aodr(), Aodr::NormalAODR7);
+                assert_eq!(data.afs(), AccelerometerFS::FS2G);
+                assert_eq!(data.aodr(), AccelerometerODR::NormalAODR7);
             }
 
             #[test]
@@ -362,8 +401,8 @@ pub mod register {
 
                 let mut data = Ctrl2Register(register_default);
                 data.set_ast(true);
-                data.set_afs(Afs::AFS2G);
-                data.set_aodr(Aodr::NormalAODR7);
+                data.set_afs(AccelerometerFS::FS2G);
+                data.set_aodr(AccelerometerODR::NormalAODR7);
                 assert_eq!(data.0, register_result);
             }
         }
@@ -374,7 +413,7 @@ pub mod register {
 
         use crate::define_enum_with_bitrange;
 
-        define_enum_with_bitrange!(Gfs {
+        define_enum_with_bitrange!(GyroscopeFS {
             /// ±16 dps
             DPS16 = 0b000,
             /// ±32 dps
@@ -394,35 +433,54 @@ pub mod register {
         });
 
         // Gyroscope Settings
-        define_enum_with_bitrange!(Godr {
-            /// 7174.4 Hz Normal 100%
-            Hz7174_4 = 0b0000,
-            /// 3587.2 Hz Normal 100%
-            Hz3587_2 = 0b0001,
-            /// 1793.6 Hz Normal 100%
-            Hz1793_6 = 0b0010,
-            /// 896.8 Hz Normal 100%
-            Hz896_8 = 0b0011,
-            /// 448.4 Hz Normal 100%
-            Hz448_4 = 0b0100,
-            /// 224.2 Hz Normal 100%
-            Hz224_2 = 0b0101,
-            /// 112.1 Hz Normal 100%
-            Hz112_1 = 0b0110,
-            /// 56.05 Hz Normal 100%
-            Hz56_05 = 0b0111,
-            /// 28.025 Hz Normal 100%
-            Hz28_025 = 0b1000,
+        define_enum_with_bitrange!(GyroscopeODR {
+            /// ODR Rate (Hz): 7174.4 Hz
+            /// Mode: Normal
+            /// Duty Cycle: 100%
+            NormalGORD0 = 0b0000,
+            /// ODR Rate (Hz): 3587.2 Hz
+            /// Mode: Normal
+            /// Duty Cycle: 100%
+            NormalGORD1 = 0b0001,
+            /// ODR Rate (Hz): 1793.6 Hz
+            /// Mode: Normal
+            /// Duty Cycle: 100%
+            NormalGORD2 = 0b0010,
+            /// ODR Rate (Hz): 896.8 Hz
+            /// Mode: Normal
+            /// Duty Cycle: 100%
+            NormalGORD3 = 0b0011,
+            /// ODR Rate (Hz): 448.4 Hz
+            /// Mode: Normal
+            /// Duty Cycle: 100%
+            NormalGORD4 = 0b0100,
+            /// ODR Rate (Hz): 224.2 Hz
+            /// Mode: Normal
+            /// Duty Cycle: 100%
+            NormalGORD5 = 0b0101,
+            /// ODR Rate (Hz): 112.1 Hz
+            /// Mode: Normal
+            /// Duty Cycle: 100%
+            NormalGORD6 = 0b0110,
+            /// ODR Rate (Hz): 56.05 Hz
+            /// Mode: Normal
+            /// Duty Cycle: 100%
+            NormalGORD7 = 0b0111,
+            /// ODR Rate (Hz): 28.025 Hz
+            /// Mode: Normal
+            /// Duty Cycle: 100%
+            NormalGORD8 = 0b1000,
         });
 
         bitfield! {
+            /// Gyroscope Settings
             pub struct Ctrl3Register(u8);
             impl Debug;
             bool, ast, set_ast: 7;
             #[doc = "Set Gyroscope Full-scale"]
-            Gfs, gfs, set_gfs: 6, 4;
+            GyroscopeFS, gfs, set_gfs: 6, 4;
             #[doc = "Set Gyroscope Output Data Rate (ODR)"]
-            Godr, godr, set_godr: 3, 0;
+            GyroscopeODR, godr, set_godr: 3, 0;
         }
     }
 
@@ -501,7 +559,7 @@ pub mod register {
             #[doc = "Set Gyroscope Mode. This bit is effective only when Gyroscope is enabled. Refer to 7.1."]
             GSN, gsn, set_gsn: 4;
             #[doc = "Reserved"]
-            u8, reserved_3, set_reserved_3: 3, 2;
+            u8, reserved_2_3, set_reserved_2_3: 3, 2;
             #[doc = "Set Gyroscope Enable"]
             bool, gyroscope_enable, set_gyroscope_enable: 1;
             #[doc = "Set Accelerometer Enable"]
@@ -754,7 +812,6 @@ pub mod register {
             /// Output Data Status Register
             pub struct OutputDataStatusRegister(u8);
             impl Debug;
-            ///
             #[doc = "Reserved"]
             u8, reserved_2_7, set_reserved_2_7: 7, 2;
             #[doc = "Gyroscope new data available"]
@@ -821,15 +878,20 @@ pub mod register {
         //! Sample time stamp. Count incremented by one for each sample
         //! (x, y, z data set) from sensor with highest ODR (circular register
         //! 0x0-0xFFFFFF).
-        pub struct SampleTimeStamp(u32);
+        //!
 
+        /// Time Stamp Register Size
         pub struct TimeStampRegister(u8);
+
+        /// Sample Time Stamp
+        pub struct SampleTimeStamp(u32);
     }
 
     pub mod temp {
         //! Temperature output (°C) in two’s complement.
         //! T = `TEMP_H` + (`TEMP_L` / 256)
 
+        /// Temperature Register Size
         pub struct TempRegister(u8);
 
         /// Temperature Sensor Register Address: 0x33 – 0x34
@@ -837,7 +899,10 @@ pub mod register {
     }
 
     pub mod acceleration {
+        /// Acceleration Register Size
         pub struct AccelerationRegister(u8);
+
+        /// Angular Register Size
         pub struct AngularRegister(u8);
 
         /// Acceleration Output. Register Address: 0x35 – 0x3A
@@ -958,6 +1023,8 @@ pub mod register {
     }
 
     pub mod step_count {
+
+        /// Step Count Register Size
         pub struct StepCountRegister(u8);
 
         /// 24 `BitCounter`
@@ -965,6 +1032,8 @@ pub mod register {
     }
 
     pub mod reset {
+
+        /// Reset Register
         pub struct ResetRegister(u8);
     }
 }
