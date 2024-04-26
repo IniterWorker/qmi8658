@@ -37,7 +37,7 @@ macro_rules! define_enum_with_bitrange {
     }) => {
         #[derive(Debug, PartialEq, Eq, Clone, Copy)]
         #[repr(u8)]
-        enum $name {
+        pub enum $name {
             $(
                 $(#[$meta])*
                 $variant = $value,

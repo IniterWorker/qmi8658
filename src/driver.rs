@@ -3,15 +3,17 @@ use embedded_hal::delay::DelayNs;
 use embedded_hal::i2c::{I2c, SevenBitAddress};
 
 use crate::command::constants::{
-    AX_HIGH, AX_LOW, AY_HIGH, AZ_HIGH, AZ_LOW, COD_STATUS, CTRL1, CTRL2, CTRL3, CTRL5, CTRL7,
-    CTRL8, CTRL9, FIFO_CTRL, FIFO_DATA, FIFO_SMPL_CNT, FIFO_STATUS, FIFO_WTM_TH, GX_HIGH, GX_LOW,
-    GY_HIGH, GZ_HIGH, GZ_LOW, STATUS0, STATUS1, STATUSINT, STEP_CNT_HIGH, STEP_CNT_LOW,
+    AX_HIGH, AX_LOW, AY_HIGH, AZ_HIGH, AZ_LOW, CAL1_HIGH, CAL1_LOW, CAL2_HIGH, CAL2_LOW, CAL3_HIGH,
+    CAL3_LOW, CAL4_HIGH, CAL4_LOW, COD_STATUS, CTRL1, CTRL2, CTRL3, CTRL5, CTRL7, CTRL8, CTRL9,
+    FIFO_CTRL, FIFO_DATA, FIFO_SMPL_CNT, FIFO_STATUS, FIFO_WTM_TH, GX_HIGH, GX_LOW, GY_HIGH,
+    GY_LOW, GZ_HIGH, GZ_LOW, RESET, STATUS0, STATUS1, STATUSINT, STEP_CNT_HIGH, STEP_CNT_LOW,
     STEP_CNT_MID, TAP_STATUS, TEMP_HIGH, TEMP_LOW, TIMESTAMP_HIGH, TIMESTAMP_LOW, TIMESTAMP_MID,
     WHO_AM_I,
 };
 use crate::command::register::acceleration::{
     AccelerationFullRegister, AccelerationOutput, AngularFullRegister, AngularRateOutput,
 };
+use crate::command::register::cal::{Calibration, CalibrationRegisters};
 use crate::command::register::cod_status::CODStatusRegister;
 use crate::command::register::ctrl1::Ctrl1Register;
 use crate::command::register::ctrl2::Ctrl2Register;
@@ -101,6 +103,24 @@ where
         self.interface
     }
 
+    /// Write Register
+    ///
+    /// # Errors
+    ///
+    /// This function can return an error if there is an issue during the communication process.
+    ///
+    /// Possible errors include:
+    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+
+    fn write_register(&mut self, register_addr: u8, data: u8) -> Result<(), I::Error> {
+        // Create a buffer that includes the register address and the data
+        let buffer = [register_addr, data];
+
+        // Write the buffer to the device
+        self.interface.write(self.addr.into(), &buffer)?;
+        Ok(())
+    }
+
     /// Get the device id.
     ///
     /// This function retrieves the device ID from the connected device.
@@ -155,7 +175,20 @@ where
         Ok(Ctrl1Register(buffer[0]))
     }
 
-    /// Accelerometer Settings
+    /// Set Serial Interface and Sensor Enable.
+    ///
+    /// # Errors
+    ///
+    /// This function can return an error if there is an issue during the communication process.
+    ///
+    /// Possible errors include:
+    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    pub fn set_crtl1(&mut self, value: Ctrl1Register) -> Result<(), I::Error> {
+        self.write_register(CTRL1, value.0)?;
+        Ok(())
+    }
+
+    /// Get Accelerometer Settings
     ///
     /// # Errors
     ///
@@ -171,7 +204,20 @@ where
         Ok(Ctrl2Register(buffer[0]))
     }
 
-    /// Gyroscope Settings
+    /// Set Accelerometer Settings
+    ///
+    /// # Errors
+    ///
+    /// This function can return an error if there is an issue during the communication process.
+    ///
+    /// Possible errors include:
+    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    pub fn set_crtl2(&mut self, value: Ctrl2Register) -> Result<(), I::Error> {
+        self.write_register(CTRL2, value.0)?;
+        Ok(())
+    }
+
+    /// Get Gyroscope Settings
     ///
     /// # Errors
     ///
@@ -187,7 +233,20 @@ where
         Ok(Ctrl3Register(buffer[0]))
     }
 
-    /// Sensor Data Processing Settings
+    /// Set Gyroscope Settings
+    ///
+    /// # Errors
+    ///
+    /// This function can return an error if there is an issue during the communication process.
+    ///
+    /// Possible errors include:
+    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    pub fn set_crtl3(&mut self, value: Ctrl3Register) -> Result<(), I::Error> {
+        self.write_register(CTRL3, value.0)?;
+        Ok(())
+    }
+
+    /// Get Sensor Data Processing Settings
     ///
     /// # Errors
     ///
@@ -203,7 +262,20 @@ where
         Ok(Ctrl5Register(buffer[0]))
     }
 
-    /// Enable Sensors and Configure Data Reads
+    /// Set Sensor Data Processing Settings
+    ///
+    /// # Errors
+    ///
+    /// This function can return an error if there is an issue during the communication process.
+    ///
+    /// Possible errors include:
+    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    pub fn set_crtl5(&mut self, value: Ctrl5Register) -> Result<(), I::Error> {
+        self.write_register(CTRL5, value.0)?;
+        Ok(())
+    }
+
+    /// Get Enable Sensors and Configure Data Reads
     ///
     /// # Errors
     ///
@@ -219,7 +291,20 @@ where
         Ok(Ctrl7Register(buffer[0]))
     }
 
-    /// Motion Detection Control
+    /// Set Enable Sensors and Configure Data Reads
+    ///
+    /// # Errors
+    ///
+    /// This function can return an error if there is an issue during the communication process.
+    ///
+    /// Possible errors include:
+    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    pub fn set_crtl7(&mut self, value: Ctrl7Register) -> Result<(), I::Error> {
+        self.write_register(CTRL7, value.0)?;
+        Ok(())
+    }
+
+    /// Get Motion Detection Control
     ///
     /// # Errors
     ///
@@ -235,7 +320,20 @@ where
         Ok(Ctrl8Register(buffer[0]))
     }
 
-    /// Host Commands. Register Address: 10 (0x0A)
+    /// Set Motion Detection Control
+    ///
+    /// # Errors
+    ///
+    /// This function can return an error if there is an issue during the communication process.
+    ///
+    /// Possible errors include:
+    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    pub fn set_crtl8(&mut self, value: &Ctrl8Register) -> Result<(), I::Error> {
+        self.write_register(CTRL8, value.0)?;
+        Ok(())
+    }
+
+    /// Get Host Commands. Register Address: 10 (0x0A)
     /// Referred to: CTRL 9 Functionality (Executing Pre-defined Commands)
     ///
     /// # Errors
@@ -268,6 +366,32 @@ where
             // TODO: improve this error handling
             _ => Ctrl9Register::CtrlCmdAck,
         })
+    }
+
+    /// Set Host Commands
+    ///
+    /// # Errors
+    ///
+    /// This function can return an error if there is an issue during the communication process.
+    ///
+    /// Possible errors include:
+    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    pub fn set_crtl9(&mut self, value: Ctrl9Register) -> Result<(), I::Error> {
+        self.write_register(CTRL9, value as u8)?;
+        Ok(())
+    }
+
+    /// Software Reset
+    ///
+    /// # Errors
+    ///
+    /// This function can return an error if there is an issue during the communication process.
+    ///
+    /// Possible errors include:
+    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    pub fn reset(&mut self) -> Result<(), I::Error> {
+        self.write_register(RESET, 0x4D)?;
+        Ok(())
     }
 
     /// FIFO Watermark Register Address
@@ -434,13 +558,12 @@ where
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
     pub fn get_temperature(&mut self) -> Result<Temperature, I::Error> {
         let mut buffer = [0u8; 1];
-        let mut temp: Temperature = 0;
         self.interface
             .write_read(self.addr.into(), &[TEMP_HIGH], &mut buffer)?;
-        temp |= Temperature::from(buffer[0]) << 8;
+        let mut temp = Temperature::from(buffer[0]);
         self.interface
             .write_read(self.addr.into(), &[TEMP_LOW], &mut buffer)?;
-        temp |= Temperature::from(buffer[0]);
+        temp += Temperature::from(buffer[0]) / 265.;
 
         Ok(temp)
     }
@@ -520,9 +643,88 @@ where
     pub fn get_angular_rate(&mut self) -> Result<AngularRateOutput, I::Error> {
         Ok(AngularRateOutput {
             x: self.get_angular_rate_helper(GX_HIGH, GX_LOW)?,
-            y: self.get_angular_rate_helper(GY_HIGH, GX_LOW)?,
+            y: self.get_angular_rate_helper(GY_HIGH, GY_LOW)?,
             z: self.get_angular_rate_helper(GZ_HIGH, GZ_LOW)?,
         })
+    }
+
+    /// Get Calibration
+    ///
+    /// # Errors
+    ///
+    /// This function can return an error if there is an issue during the communication process.
+    ///
+    /// Possible errors include:
+    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    fn get_calibration_helper(
+        &mut self,
+        high_addr: u8,
+        low_addr: u8,
+    ) -> Result<Calibration, I::Error> {
+        let mut buffer = [0u8; 1];
+        let mut tmp: u16 = 0;
+        self.interface
+            .write_read(self.addr.into(), &[high_addr], &mut buffer)?;
+        tmp |= u16::from(buffer[0]) << 8;
+        self.interface
+            .write_read(self.addr.into(), &[low_addr], &mut buffer)?;
+        tmp |= u16::from(buffer[0]);
+        Ok(Calibration(tmp))
+    }
+
+    /// Set Calibration
+    ///
+    /// # Errors
+    ///
+    /// This function can return an error if there is an issue during the communication process.
+    ///
+    /// Possible errors include:
+    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    fn set_calibration_helper(
+        &mut self,
+        high_addr: u8,
+        low_addr: u8,
+        cal: Calibration,
+    ) -> Result<(), I::Error> {
+        self.write_register(high_addr, cal.high())?;
+        self.write_register(low_addr, cal.low())?;
+        Ok(())
+    }
+
+    /// Get Calibrations Registers
+    ///
+    /// # Errors
+    ///
+    /// This function can return an error if there is an issue during the communication process.
+    ///
+    /// Possible errors include:
+    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    pub fn get_calibration_registers(&mut self) -> Result<CalibrationRegisters, I::Error> {
+        Ok(CalibrationRegisters {
+            cal1: self.get_calibration_helper(CAL1_HIGH, CAL1_LOW)?,
+            cal2: self.get_calibration_helper(CAL2_HIGH, CAL2_LOW)?,
+            cal3: self.get_calibration_helper(CAL3_HIGH, CAL3_LOW)?,
+            cal4: self.get_calibration_helper(CAL4_HIGH, CAL4_LOW)?,
+        })
+    }
+
+    /// Set Calibrations Registers
+    ///
+    /// # Errors
+    ///
+    /// This function can return an error if there is an issue during the communication process.
+    ///
+    /// Possible errors include:
+    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    pub fn set_calibration_registers(
+        &mut self,
+        registers: CalibrationRegisters,
+    ) -> Result<(), I::Error> {
+        self.set_calibration_helper(CAL1_HIGH, CAL1_LOW, registers.cal1)?;
+        self.set_calibration_helper(CAL2_HIGH, CAL2_LOW, registers.cal2)?;
+        self.set_calibration_helper(CAL3_HIGH, CAL3_LOW, registers.cal3)?;
+        self.set_calibration_helper(CAL4_HIGH, CAL4_LOW, registers.cal4)?;
+        Ok(())
     }
 
     /// Get Calibration-On-Demand (COD) Status Register

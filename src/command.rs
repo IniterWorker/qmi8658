@@ -214,16 +214,16 @@ pub mod register {
 
         bitfield! {
             /// Serial Interface and Sensor Enable
+            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
             pub struct Ctrl1Register(u8);
-            impl Debug;
-            bool, sim, set_sim: 7;
-            bool, addr_ai, set_addr_ai: 6;
-            bool, be, set_be: 5;
-            bool, int2_enable, set_int2_enable: 4;
-            bool, int1_enable, set_int1_enable: 3;
-            bool, fifo_int_sel, set_fifo_int_sel: 2;
-            bool, reserved, set_reserved: 1;
-            bool, sensor_disable, set_sensor_disable: 0;
+            pub bool, sim, set_sim: 7;
+            pub bool, addr_ai, set_addr_ai: 6;
+            pub bool, be, set_be: 5;
+            pub bool, int2_enable, set_int2_enable: 4;
+            pub bool, int1_enable, set_int1_enable: 3;
+            pub bool, fifo_int_sel, set_fifo_int_sel: 2;
+            pub bool, reserved, set_reserved: 1;
+            pub bool, sensor_disable, set_sensor_disable: 0;
         }
     }
 
@@ -319,13 +319,13 @@ pub mod register {
 
         bitfield! {
             /// Accelerometer Settings: Address:
+            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
             pub struct Ctrl2Register(u8);
-            impl Debug;
-            bool, ast, set_ast: 7;
+            pub bool, ast, set_ast: 7;
             #[doc = "Set Accelerometer Full-scale"]
-            AccelerometerFS, afs, set_afs: 6, 4;
+            pub AccelerometerFS, afs, set_afs: 6, 4;
             #[doc = "Set Accelerometer Output Data Rate (ODR)"]
-            AccelerometerODR, aodr, set_aodr: 3, 0;
+            pub AccelerometerODR, aodr, set_aodr: 3, 0;
         }
 
         #[cfg(test)]
@@ -478,13 +478,13 @@ pub mod register {
 
         bitfield! {
             /// Gyroscope Settings
+            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
             pub struct Ctrl3Register(u8);
-            impl Debug;
-            bool, ast, set_ast: 7;
+            pub bool, ast, set_ast: 7;
             #[doc = "Set Gyroscope Full-scale"]
-            GyroscopeFS, gfs, set_gfs: 6, 4;
+            pub GyroscopeFS, gfs, set_gfs: 6, 4;
             #[doc = "Set Gyroscope Output Data Rate (ODR)"]
-            GyroscopeODR, godr, set_godr: 3, 0;
+            pub GyroscopeODR, godr, set_godr: 3, 0;
         }
     }
 
@@ -517,20 +517,20 @@ pub mod register {
 
         bitfield! {
             /// Sensor Data Processing Settings
+            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
             pub struct Ctrl5Register(u8);
-            impl Debug;
             #[doc = "Reserved"]
-            bool, reserved_7, set_reserved_7: 7;
+            pub bool, reserved_7, set_reserved_7: 7;
             #[doc = "Set Gyroscope LPF Mode"]
-            GLPFMode, glpf, set_glpf: 6, 5;
+            pub GLPFMode, glpf, set_glpf: 6, 5;
             #[doc = "Set Gyroscope LPF Enable"]
-            bool, glpf_enable, set_glpf_enable: 4;
+            pub bool, glpf_enable, set_glpf_enable: 4;
             #[doc = "Reserved"]
-            bool, reserved_3, set_reserved_3: 3;
+            pub bool, reserved_3, set_reserved_3: 3;
             #[doc = "Set Accelerometer LPF Mode"]
-            ALPFMode, alpf, set_alpf: 2, 0;
+            pub ALPFMode, alpf, set_alpf: 2, 0;
             #[doc = "Set Accelerometer LPF Enable"]
-            bool, alpf_enable, set_alpf_enable: 0;
+            pub bool, alpf_enable, set_alpf_enable: 0;
         }
     }
 
@@ -548,26 +548,25 @@ pub mod register {
 
         bitfield! {
             /// Enable Sensors and COnfigure Data Reads
+            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
             pub struct Ctrl7Register(u8);
-            impl Debug;
             #[doc = "Set Sync Sample Enable"]
-
-            bool, sync_sample_enable, set_sync_sample_enable: 7;
+            pub bool, sync_sample_enable, set_sync_sample_enable: 7;
             #[doc = "Reserved"]
-            bool, reserved_6, set_reserved_6: 6;
+            pub bool, reserved_6, set_reserved_6: 6;
             #[doc = "Set Data Ready Disabled\n\
                     DRDY(Data Ready) is enabled, is driven to INT2 pin\n\
                     DRDY(Data Ready) is disabled, is blocked from the INT2 pin\n\
             "]
-            bool, data_ready_disable, set_data_ready_disable: 5;
+            pub bool, data_ready_disable, set_data_ready_disable: 5;
             #[doc = "Set Gyroscope Mode. This bit is effective only when Gyroscope is enabled. Refer to 7.1."]
-            GSN, gsn, set_gsn: 4;
+            pub GSN, gsn, set_gsn: 4;
             #[doc = "Reserved"]
-            u8, reserved_2_3, set_reserved_2_3: 3, 2;
+            pub u8, reserved_2_3, set_reserved_2_3: 3, 2;
             #[doc = "Set Gyroscope Enable"]
-            bool, gyroscope_enable, set_gyroscope_enable: 1;
+            pub bool, gyroscope_enable, set_gyroscope_enable: 1;
             #[doc = "Set Accelerometer Enable"]
-            bool, accelerometer_enable, set_accelerometer_enable: 0;
+            pub bool, accelerometer_enable, set_accelerometer_enable: 0;
         }
     }
 
@@ -592,27 +591,27 @@ pub mod register {
 
         bitfield! {
             /// Enable Sensors and COnfigure Data Reads
+            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
             pub struct Ctrl8Register(u8);
-            impl Debug;
             #[doc = "Set CTRL9_HandShake_Type"]
-            HandShakeType, ctrl9_handshake_type, set_ctrl9_handshake_type: 7;
+            pub HandShakeType, ctrl9_handshake_type, set_ctrl9_handshake_type: 7;
             #[doc = "Set Activity Int Selection\n\
                     ## NOTE: this bit influences the Any/No/Sig-motion, Pedometer, Tap Detection interrupt
             "]
-            ActivityIntSelect, activity_int_select, set_activity_int_select: 6;
+            pub ActivityIntSelect, activity_int_select, set_activity_int_select: 6;
             #[doc = "Set Data Ready Disabled\n\
                     DRDY(Data Ready) is enabled, is driven to INT2 pin\n\
                     DRDY(Data Ready) is disabled, is blocked from the INT2 pin\n\
             "]
-            bool, data_ready_disable, set_data_ready_disable: 5;
+            pub bool, data_ready_disable, set_data_ready_disable: 5;
             #[doc = "Set Gyroscope Mode. This bit is effective only when Gyroscope is enabled. Refer to 7.1."]
-            GSN, gsn, set_gsn: 4;
+            pub GSN, gsn, set_gsn: 4;
             #[doc = "Reserved"]
-            u8, reserved_3, set_reserved_3: 3, 2;
+            pub u8, reserved_3, set_reserved_3: 3, 2;
             #[doc = "Set Gyroscope Enable"]
-            bool, gyroscope_enable, set_gyroscope_enable: 1;
+            pub bool, gyroscope_enable, set_gyroscope_enable: 1;
             #[doc = "Set Accelerometer Enable"]
-            bool, accelerometer_enable, set_accelerometer_enable: 0;
+            pub bool, accelerometer_enable, set_accelerometer_enable: 0;
         }
     }
 
@@ -668,6 +667,29 @@ pub mod register {
         }
     }
 
+    pub mod cal {
+        use bitfield::bitfield;
+
+        bitfield! {
+            /// FIFO Control Register
+            #[derive(Debug, PartialEq, Eq, Clone, Copy)]
+            pub struct Calibration(u16);
+            #[doc = "HIGH"]
+            pub u8, high, set_high: 15, 8;
+            #[doc = "LOW"]
+            pub u8, low, set_low: 7, 0;
+        }
+
+        /// Host Controlled Calibration Registers
+        #[derive(Debug, PartialEq, Eq, Clone, Copy)]
+        pub struct CalibrationRegisters {
+            pub cal1: Calibration,
+            pub cal2: Calibration,
+            pub cal3: Calibration,
+            pub cal4: Calibration,
+        }
+    }
+
     pub mod fifo_wtm_th {
 
         /// Number of ODRs(Samples) needed to trigger FIFO watermark
@@ -703,20 +725,20 @@ pub mod register {
 
         bitfield! {
             /// FIFO Control Register
+            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
             pub struct FIFOControlRegister(u8);
-            impl Debug;
             ///
             #[doc = "FIFO Read Mode\n\
                     FIFO is in Write mode, sensor data (if enabled) can be filled into FIFO\n\
                     FIFO is in Read mode, FIFO data can be read via FIFO_DATA register\n\
             "]
-            bool, fifo_rd_mode, set_fifo_rd_mode: 7;
+            pub bool, fifo_rd_mode, set_fifo_rd_mode: 7;
             #[doc = "Reserved"]
-            u8, reserved_4_6, set_reserved_4_6: 6, 4;
+            pub u8, reserved_4_6, set_reserved_4_6: 6, 4;
             #[doc = "FIFO Size"]
-            FIFOSize, fifo_size, set_fifo_size: 3, 2;
+            pub FIFOSize, fifo_size, set_fifo_size: 3, 2;
             #[doc = "FIFO Mode"]
-            FIFOMode, fifo_mode, set_fifo_mode: 1, 0;
+            pub FIFOMode, fifo_mode, set_fifo_mode: 1, 0;
         }
     }
 
@@ -725,10 +747,10 @@ pub mod register {
 
         bitfield! {
             /// FIFO Sample Count Register
+            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
             pub struct FIFOSampleCountRegister(u8);
-            impl Debug;
             #[doc = "FIFO Count"]
-            bool, fifo_smpl_cnt_lsb: 7, 0;
+            pub bool, fifo_smpl_cnt_lsb: 7, 0;
         }
     }
 
@@ -737,20 +759,20 @@ pub mod register {
 
         bitfield! {
             /// FIFO Status Register
+            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
             pub struct FIFOStatusRegister(u8);
-            impl Debug;
             #[doc = "FIFO is full"]
-            bool, fifo_full, set_fifo_full: 7;
+            pub bool, fifo_full, set_fifo_full: 7;
             #[doc = "FIFO Water Mark Level is hit"]
-            bool, fifo_wtm, set_fifo_wtm: 6;
+            pub bool, fifo_wtm, set_fifo_wtm: 6;
             #[doc = "FIFO Overflow condition has happened"]
-            bool, fifo_overflow, set_fifo_overflow: 5;
+            pub bool, fifo_overflow, set_fifo_overflow: 5;
             #[doc = "FIFO Not Empty"]
-            bool, fifo_not_empty, set_fifo_not_empty: 4;
+            pub bool, fifo_not_empty, set_fifo_not_empty: 4;
             #[doc = "Reserved"]
-            u8, reserved_3_2, set_reserved_3_2: 3, 2;
+            pub u8, reserved_3_2, set_reserved_3_2: 3, 2;
             #[doc = "2 MS bits of FIFO Sample Count in word (2bytes)"]
-            u8, fifo_smpl_cnt_msb, set_fifo_smpl_cnt_msb: 1, 0;
+            pub u8, fifo_smpl_cnt_msb, set_fifo_smpl_cnt_msb: 1, 0;
         }
     }
 
@@ -759,10 +781,10 @@ pub mod register {
 
         bitfield! {
             /// FIFO Data Register
+            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
             pub struct FIFODataRegister(u8);
-            impl Debug;
             #[doc = "FIFO Data, 8 bit FIFO data output."]
-            bool, fifo_data: 7, 0;
+            pub bool, fifo_data: 7, 0;
         }
     }
 
@@ -780,23 +802,22 @@ pub mod register {
 
         bitfield! {
             /// Sensor Data Available and Lock Register
+            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
             pub struct SensorDataAvailableAndLockRegister(u8);
-            impl Debug;
-            ///
             #[doc = "Indicates CTRL9 Command was done, as part of CTRL9 protocol"]
-            Ctrl9CmdDone, ctrl9_cmd_done, set_ctrl9_cmd_done: 7;
+            pub Ctrl9CmdDone, ctrl9_cmd_done, set_ctrl9_cmd_done: 7;
             #[doc = "Reserved"]
-            u8, reserved_2_6, set_reserved_2_6: 6, 2;
+            pub u8, reserved_2_6, set_reserved_2_6: 6, 2;
             #[doc = "if `ctrl7.sync_sample_enable` is enabled then `false` sensor data is not locked, \
                     else `true` sensor data is locked.\n\
                     if `ctrl7.sync_sample_enable` is disabled then the bit shows the same value of INT1.\n\
             "]
-            bool, locked, set_locked: 1;
+            pub bool, locked, set_locked: 1;
             #[doc = "if `ctrl7.sync_sample_enable` is enabled then `false` sensor data is not available, \
                     else `true` sensor data is available for reading.\n\
                     if `ctrl7.sync_sample_enable` is disabled then the bit shows the same value of INT2.\n\
             "]
-            bool, available, set_available: 0;
+            pub bool, available, set_available: 0;
         }
     }
 
@@ -814,14 +835,14 @@ pub mod register {
 
         bitfield! {
             /// Output Data Status Register
+            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
             pub struct OutputDataStatusRegister(u8);
-            impl Debug;
             #[doc = "Reserved"]
-            u8, reserved_2_7, set_reserved_2_7: 7, 2;
+            pub u8, reserved_2_7, set_reserved_2_7: 7, 2;
             #[doc = "Gyroscope new data available"]
-            UpdateData, gyroscope_data_available, set_gyroscope_data_available: 1;
+            pub UpdateData, gyroscope_data_available, set_gyroscope_data_available: 1;
             #[doc = "Accelerometer new data available"]
-            UpdateData, accelerometer_data_available, set_accelerometer_data_available: 0;
+            pub UpdateData, accelerometer_data_available, set_accelerometer_data_available: 0;
         }
     }
 
@@ -839,42 +860,42 @@ pub mod register {
 
         bitfield! {
             /// Miscellaneous Status Register
+            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
             pub struct MiscellaneousStatusRegister(u8);
-            impl Debug;
             #[doc = "Significant Motion\n\
                 * No Significant-Motion was detected\n\
                 * Significant-Motion was detected\n\
             "]
-            EngineDetect, significant_motion, set_significant_motion: 7;
+            pub EngineDetect, significant_motion, set_significant_motion: 7;
             #[doc = "No Motion\n\
                 * No No-Motion was detected\n\
                 * No-Motion was detected\n\
             "]
-            EngineDetect, no_motion, set_no_motion: 6;
+            pub EngineDetect, no_motion, set_no_motion: 6;
             #[doc = "Any Motion\n\
                 * No Any-Motion was detected\n\
                 * Any-Motion was detected\n\
             "]
-            EngineDetect, any_motion, set_any_motion: 5;
+            pub EngineDetect, any_motion, set_any_motion: 5;
             #[doc = "Pedometer\n\
                 * No step was detected\n\
                 * step was detected\n\
             "]
-            EngineDetect, pedometer, set_pedometer: 4;
+            pub EngineDetect, pedometer, set_pedometer: 4;
             #[doc = "Reserved"]
-            u8, reserved_3, set_reserved_3: 3;
+            pub u8, reserved_3, set_reserved_3: 3;
             #[doc = "WoM\n\
                 * No WoM was detected\n\
                 * WoM was detected\n\
             "]
-            EngineDetect, wom, set_wom: 2;
+            pub EngineDetect, wom, set_wom: 2;
             #[doc = "Tap\n\
                 * No Tap was detected\n\
                 * Tap was detected\n\
             "]
-            EngineDetect, tap, set_tap: 1;
+            pub EngineDetect, tap, set_tap: 1;
             #[doc = "Reserved"]
-            u8, reserved_0, set_reserved_0: 0;
+            pub u8, reserved_0, set_reserved_0: 0;
         }
     }
 
@@ -899,7 +920,7 @@ pub mod register {
         pub type TempRegister = u8;
 
         /// Temperature Sensor Register Address: 0x33 – 0x34
-        pub type Temperature = u16;
+        pub type Temperature = f32;
     }
 
     pub mod acceleration {
@@ -943,32 +964,32 @@ pub mod register {
 
         bitfield! {
             #[doc = "COD Status Register"]
+            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
             pub struct CODStatusRegister(u8);
-            impl Debug;
             #[doc = "COD passed for checking low sensitivity limit of X axis of gyroscope\n\
             COD failed for checking low sensitivity limit of X axis of gyroscope"]
-            bool, x_limit_l_fail, set_x_limit_l_fail: 7;
+            pub bool, x_limit_l_fail, set_x_limit_l_fail: 7;
             #[doc = "COD passed for checking high sensitivity limit of X axis of gyroscope\n\
             COD failed for checking high sensitivity limit of X axis of gyroscope"]
-            bool, x_limit_h_fail, set_x_limit_h_fail: 6;
+            pub bool, x_limit_h_fail, set_x_limit_h_fail: 6;
             #[doc = "COD passed for checking low sensitivity limit of Y axis of gyroscope\n\
             COD failed for checking low sensitivity limit of Y axis of gyroscope"]
-            bool, y_limit_l_fail, set_y_limit_l_fail: 5;
+            pub bool, y_limit_l_fail, set_y_limit_l_fail: 5;
             #[doc = "COD passed for checking high sensitivity limit of Y axis of gyroscope\n\
             COD failed for checking high sensitivity limit of Y axis of gyroscope"]
-            bool, y_limit_h_fail, set_y_limit_h_fail: 4;
+            pub bool, y_limit_h_fail, set_y_limit_h_fail: 4;
             #[doc = "Accelerometer checked pass (no significant vibration happened during COD)\n\
             Accelerometer checked failed (significant vibration happened during COD)"]
-            bool, accel_check, set_accel_check: 3;
+            pub bool, accel_check, set_accel_check: 3;
             #[doc = "Gyroscope startup succeeded\n\
             Gyroscope startup failure happened when COD was called"]
-            bool, startup_failed, set_startup_failed: 2;
+            pub bool, startup_failed, set_startup_failed: 2;
             #[doc = "COD was called when gyroscope was not enabled\n\
             COD was called while gyroscope was enabled, COD return failure"]
-            bool, gyro_enabled, set_gyro_enabled: 1;
+            pub bool, gyro_enabled, set_gyro_enabled: 1;
             #[doc = "COD succeeded, new gain parameters will be applied to GX & GY data\n\
             COD failed; no COD correction applied"]
-            bool, cod_failed, set_cod_failed: 0;
+            pub bool, cod_failed, set_cod_failed: 0;
         }
     }
 
@@ -1009,28 +1030,28 @@ pub mod register {
         bitfield! {
             /// Tap Status Register
             #[doc = "Tap Status Register"]
+            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
             pub struct TapStatusRegister(u8);
-            impl Debug;
             #[doc = "Tap was detected on the positive direction of the Tap axis\n\
                     Tap was detected on the negative direction of the Tap axis\
             "]
-            TapPolarity, tap_polarity, set_tap_polarity: 7;
+            pub TapPolarity, tap_polarity, set_tap_polarity: 7;
             #[doc = "Reserved"]
-            u8, reserved_6, set_reserved_6: 6;
+            pub u8, reserved_6, set_reserved_6: 6;
             #[doc = "No Tap was detected\n\
                     Tap was detected on X axis\n\
                     Tap was detected on Y axis\n\
                     Tap was detected on Z axis\
             "]
-            TapAxis, tap_axis, set_tap_axis: 5, 4;
+            pub TapAxis, tap_axis, set_tap_axis: 5, 4;
             #[doc = "Reserved"]
-            u8, reserved_3_2, set_reserved_3_2: 3, 2;
+            pub u8, reserved_3_2, set_reserved_3_2: 3, 2;
             #[doc = "No Tap was detected\n\
                     Single-Tap was detected\n\
                     Double-Tap was detected\n\
                     NA\
             "]
-            TapNumber, tap_num, set_tap_num: 1, 0;
+            pub TapNumber, tap_num, set_tap_num: 1, 0;
         }
     }
 
