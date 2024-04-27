@@ -928,13 +928,13 @@ pub mod register {
         pub type AccelerationRegister = u8;
 
         /// Acceleration Register Size
-        pub type AccelerationFullRegister = u16;
+        pub type AccelerationFullRegister = i16;
 
         /// Angular Register Size
         pub type AngularRegister = u8;
 
         /// Angular Register Size
-        pub type AngularFullRegister = u16;
+        pub type AngularFullRegister = i16;
 
         /// Acceleration Output. Register Address: 0x35 – 0x3A
         #[derive(Debug, PartialEq, Eq, Clone, Copy)]
