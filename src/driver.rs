@@ -59,6 +59,23 @@ impl Default for DeviceAddress {
     }
 }
 
+/// `Qmi8658` driver's `Error`
+#[derive(Debug)]
+pub enum Error<E> {
+    /// Error related to the driver communication
+    Communication(E),
+    /// On-Demande Calibration Failed
+    CoDFailed,
+    /// Gyroscope Startup Failed
+    GyroscopeFailed,
+}
+
+impl<E> From<E> for Error<E> {
+    fn from(value: E) -> Self {
+        Self::Communication(value)
+    }
+}
+
 /// Qmi8658 Driver
 pub struct Qmi8658<I, D> {
     /// I2C Interface
@@ -66,7 +83,7 @@ pub struct Qmi8658<I, D> {
     /// I2C Address
     pub(crate) addr: DeviceAddress,
     /// Delay
-    pub(crate) _delay: D,
+    pub(crate) delay: D,
 }
 
 // #[derive(Clone, Debug)]
@@ -85,7 +102,7 @@ where
         Self {
             interface,
             addr: DeviceAddress::Primary,
-            _delay: delay,
+            delay,
         }
     }
 
@@ -94,7 +111,7 @@ where
         Self {
             interface,
             addr: DeviceAddress::Secondary,
-            _delay: delay,
+            delay,
         }
     }
 
@@ -112,7 +129,7 @@ where
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
 
-    fn write_register(&mut self, register_addr: u8, data: u8) -> Result<(), I::Error> {
+    fn write_register(&mut self, register_addr: u8, data: u8) -> Result<(), Error<I::Error>> {
         // Create a buffer that includes the register address and the data
         let buffer = [register_addr, data];
 
@@ -131,7 +148,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_device_id(&mut self) -> Result<DeviceID, I::Error> {
+    pub fn get_device_id(&mut self) -> Result<DeviceID, Error<I::Error>> {
         let mut buffer = [0u8; 1];
         self.interface
             .write_read(self.addr.into(), &[WHO_AM_I], &mut buffer)?;
@@ -151,7 +168,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_device_revision_id(&mut self) -> Result<RevisionID, I::Error> {
+    pub fn get_device_revision_id(&mut self) -> Result<RevisionID, Error<I::Error>> {
         let mut buffer = [0u8; 1];
         self.interface
             .write_read(self.addr.into(), &[WHO_AM_I], &mut buffer)?;
@@ -167,7 +184,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_crtl1(&mut self) -> Result<Ctrl1Register, I::Error> {
+    pub fn get_crtl1(&mut self) -> Result<Ctrl1Register, Error<I::Error>> {
         let mut buffer = [0u8; 1];
         self.interface
             .write_read(self.addr.into(), &[CTRL1], &mut buffer)?;
@@ -183,7 +200,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn set_crtl1(&mut self, value: Ctrl1Register) -> Result<(), I::Error> {
+    pub fn set_crtl1(&mut self, value: Ctrl1Register) -> Result<(), Error<I::Error>> {
         self.write_register(CTRL1, value.0)?;
         Ok(())
     }
@@ -196,7 +213,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_ctrl2(&mut self) -> Result<Ctrl2Register, I::Error> {
+    pub fn get_ctrl2(&mut self) -> Result<Ctrl2Register, Error<I::Error>> {
         let mut buffer = [0u8; 1];
         self.interface
             .write_read(self.addr.into(), &[CTRL2], &mut buffer)?;
@@ -212,7 +229,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn set_crtl2(&mut self, value: Ctrl2Register) -> Result<(), I::Error> {
+    pub fn set_crtl2(&mut self, value: Ctrl2Register) -> Result<(), Error<I::Error>> {
         self.write_register(CTRL2, value.0)?;
         Ok(())
     }
@@ -225,7 +242,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_ctrl3(&mut self) -> Result<Ctrl3Register, I::Error> {
+    pub fn get_ctrl3(&mut self) -> Result<Ctrl3Register, Error<I::Error>> {
         let mut buffer = [0u8; 1];
         self.interface
             .write_read(self.addr.into(), &[CTRL3], &mut buffer)?;
@@ -241,7 +258,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn set_crtl3(&mut self, value: Ctrl3Register) -> Result<(), I::Error> {
+    pub fn set_crtl3(&mut self, value: Ctrl3Register) -> Result<(), Error<I::Error>> {
         self.write_register(CTRL3, value.0)?;
         Ok(())
     }
@@ -254,7 +271,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_ctrl5(&mut self) -> Result<Ctrl5Register, I::Error> {
+    pub fn get_ctrl5(&mut self) -> Result<Ctrl5Register, Error<I::Error>> {
         let mut buffer = [0u8; 1];
         self.interface
             .write_read(self.addr.into(), &[CTRL5], &mut buffer)?;
@@ -270,7 +287,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn set_crtl5(&mut self, value: Ctrl5Register) -> Result<(), I::Error> {
+    pub fn set_crtl5(&mut self, value: Ctrl5Register) -> Result<(), Error<I::Error>> {
         self.write_register(CTRL5, value.0)?;
         Ok(())
     }
@@ -283,7 +300,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_ctrl7(&mut self) -> Result<Ctrl7Register, I::Error> {
+    pub fn get_ctrl7(&mut self) -> Result<Ctrl7Register, Error<I::Error>> {
         let mut buffer = [0u8; 1];
         self.interface
             .write_read(self.addr.into(), &[CTRL7], &mut buffer)?;
@@ -299,7 +316,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn set_crtl7(&mut self, value: Ctrl7Register) -> Result<(), I::Error> {
+    pub fn set_crtl7(&mut self, value: Ctrl7Register) -> Result<(), Error<I::Error>> {
         self.write_register(CTRL7, value.0)?;
         Ok(())
     }
@@ -312,7 +329,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_ctrl8(&mut self) -> Result<Ctrl8Register, I::Error> {
+    pub fn get_ctrl8(&mut self) -> Result<Ctrl8Register, Error<I::Error>> {
         let mut buffer = [0u8; 1];
         self.interface
             .write_read(self.addr.into(), &[CTRL8], &mut buffer)?;
@@ -328,7 +345,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn set_crtl8(&mut self, value: &Ctrl8Register) -> Result<(), I::Error> {
+    pub fn set_crtl8(&mut self, value: &Ctrl8Register) -> Result<(), Error<I::Error>> {
         self.write_register(CTRL8, value.0)?;
         Ok(())
     }
@@ -343,7 +360,7 @@ where
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
     ///
-    pub fn get_ctrl9(&mut self) -> Result<Ctrl9Register, I::Error> {
+    pub fn get_ctrl9(&mut self) -> Result<Ctrl9Register, Error<I::Error>> {
         let mut buffer = [0u8; 1];
         self.interface
             .write_read(self.addr.into(), &[CTRL9], &mut buffer)?;
@@ -376,7 +393,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn set_crtl9(&mut self, value: Ctrl9Register) -> Result<(), I::Error> {
+    pub fn set_crtl9(&mut self, value: Ctrl9Register) -> Result<(), Error<I::Error>> {
         self.write_register(CTRL9, value as u8)?;
         Ok(())
     }
@@ -389,7 +406,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn reset(&mut self) -> Result<(), I::Error> {
+    pub fn reset(&mut self) -> Result<(), Error<I::Error>> {
         self.write_register(RESET, 0x4D)?;
         Ok(())
     }
@@ -402,7 +419,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_fifo_wtm(&mut self) -> Result<FIFOWTMRegister, I::Error> {
+    pub fn get_fifo_wtm(&mut self) -> Result<FIFOWTMRegister, Error<I::Error>> {
         let mut buffer = [0u8; 1];
         self.interface
             .write_read(self.addr.into(), &[FIFO_WTM_TH], &mut buffer)?;
@@ -418,7 +435,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_fifo_ctrl(&mut self) -> Result<FIFOControlRegister, I::Error> {
+    pub fn get_fifo_ctrl(&mut self) -> Result<FIFOControlRegister, Error<I::Error>> {
         let mut buffer = [0u8; 1];
         self.interface
             .write_read(self.addr.into(), &[FIFO_CTRL], &mut buffer)?;
@@ -434,7 +451,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_fifo_sample_cnt(&mut self) -> Result<FIFOSampleCountRegister, I::Error> {
+    pub fn get_fifo_sample_cnt(&mut self) -> Result<FIFOSampleCountRegister, Error<I::Error>> {
         let mut buffer = [0u8; 1];
         self.interface
             .write_read(self.addr.into(), &[FIFO_SMPL_CNT], &mut buffer)?;
@@ -450,7 +467,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_fifo_status(&mut self) -> Result<FIFOStatusRegister, I::Error> {
+    pub fn get_fifo_status(&mut self) -> Result<FIFOStatusRegister, Error<I::Error>> {
         let mut buffer = [0u8; 1];
         self.interface
             .write_read(self.addr.into(), &[FIFO_STATUS], &mut buffer)?;
@@ -466,7 +483,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_fifo_data(&mut self) -> Result<FIFODataRegister, I::Error> {
+    pub fn get_fifo_data(&mut self) -> Result<FIFODataRegister, Error<I::Error>> {
         let mut buffer = [0u8; 1];
         self.interface
             .write_read(self.addr.into(), &[FIFO_DATA], &mut buffer)?;
@@ -484,7 +501,7 @@ where
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
     pub fn get_sensor_data_available_and_lock(
         &mut self,
-    ) -> Result<SensorDataAvailableAndLockRegister, I::Error> {
+    ) -> Result<SensorDataAvailableAndLockRegister, Error<I::Error>> {
         let mut buffer = [0u8; 1];
         self.interface
             .write_read(self.addr.into(), &[STATUSINT], &mut buffer)?;
@@ -500,7 +517,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_output_data_status(&mut self) -> Result<OutputDataStatusRegister, I::Error> {
+    pub fn get_output_data_status(&mut self) -> Result<OutputDataStatusRegister, Error<I::Error>> {
         let mut buffer = [0u8; 1];
         self.interface
             .write_read(self.addr.into(), &[STATUS0], &mut buffer)?;
@@ -516,7 +533,9 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_miscellaneous_status(&mut self) -> Result<MiscellaneousStatusRegister, I::Error> {
+    pub fn get_miscellaneous_status(
+        &mut self,
+    ) -> Result<MiscellaneousStatusRegister, Error<I::Error>> {
         let mut buffer = [0u8; 1];
         self.interface
             .write_read(self.addr.into(), &[STATUS1], &mut buffer)?;
@@ -532,7 +551,9 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_sample_time_stamp_output_count(&mut self) -> Result<SampleTimeStamp, I::Error> {
+    pub fn get_sample_time_stamp_output_count(
+        &mut self,
+    ) -> Result<SampleTimeStamp, Error<I::Error>> {
         let mut buffer = [0u8; 1];
         let mut timestamp: SampleTimeStamp = 0;
         self.interface
@@ -556,7 +577,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_temperature(&mut self) -> Result<Temperature, I::Error> {
+    pub fn get_temperature(&mut self) -> Result<Temperature, Error<I::Error>> {
         let mut buffer = [0u8; 1];
         self.interface
             .write_read(self.addr.into(), &[TEMP_HIGH], &mut buffer)?;
@@ -580,7 +601,7 @@ where
         &mut self,
         high_addr: u8,
         low_addr: u8,
-    ) -> Result<AccelerationFullRegister, I::Error> {
+    ) -> Result<AccelerationFullRegister, Error<I::Error>> {
         let mut buffer = [0u8; 1];
         let mut tmp: AccelerationFullRegister = 0;
         self.interface
@@ -600,7 +621,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_acceleration(&mut self) -> Result<AccelerationOutput, I::Error> {
+    pub fn get_acceleration(&mut self) -> Result<AccelerationOutput, Error<I::Error>> {
         Ok(AccelerationOutput {
             x: self.get_acceleration_helper(AX_HIGH, AX_LOW)?,
             y: self.get_acceleration_helper(AY_HIGH, AX_LOW)?,
@@ -620,7 +641,7 @@ where
         &mut self,
         high_addr: u8,
         low_addr: u8,
-    ) -> Result<AngularFullRegister, I::Error> {
+    ) -> Result<AngularFullRegister, Error<I::Error>> {
         let mut buffer = [0u8; 1];
         let mut tmp: AngularFullRegister = 0;
         self.interface
@@ -640,7 +661,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_angular_rate(&mut self) -> Result<AngularRateOutput, I::Error> {
+    pub fn get_angular_rate(&mut self) -> Result<AngularRateOutput, Error<I::Error>> {
         Ok(AngularRateOutput {
             x: self.get_angular_rate_helper(GX_HIGH, GX_LOW)?,
             y: self.get_angular_rate_helper(GY_HIGH, GY_LOW)?,
@@ -660,7 +681,7 @@ where
         &mut self,
         high_addr: u8,
         low_addr: u8,
-    ) -> Result<Calibration, I::Error> {
+    ) -> Result<Calibration, Error<I::Error>> {
         let mut buffer = [0u8; 1];
         let mut tmp: u16 = 0;
         self.interface
@@ -685,7 +706,7 @@ where
         high_addr: u8,
         low_addr: u8,
         cal: Calibration,
-    ) -> Result<(), I::Error> {
+    ) -> Result<(), Error<I::Error>> {
         self.write_register(high_addr, cal.high())?;
         self.write_register(low_addr, cal.low())?;
         Ok(())
@@ -699,7 +720,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_calibration_registers(&mut self) -> Result<CalibrationRegisters, I::Error> {
+    pub fn get_calibration_registers(&mut self) -> Result<CalibrationRegisters, Error<I::Error>> {
         Ok(CalibrationRegisters {
             cal1: self.get_calibration_helper(CAL1_HIGH, CAL1_LOW)?,
             cal2: self.get_calibration_helper(CAL2_HIGH, CAL2_LOW)?,
@@ -719,7 +740,7 @@ where
     pub fn set_calibration_registers(
         &mut self,
         registers: CalibrationRegisters,
-    ) -> Result<(), I::Error> {
+    ) -> Result<(), Error<I::Error>> {
         self.set_calibration_helper(CAL1_HIGH, CAL1_LOW, registers.cal1)?;
         self.set_calibration_helper(CAL2_HIGH, CAL2_LOW, registers.cal2)?;
         self.set_calibration_helper(CAL3_HIGH, CAL3_LOW, registers.cal3)?;
@@ -735,7 +756,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_cod_status(&mut self) -> Result<CODStatusRegister, I::Error> {
+    pub fn get_cod_status(&mut self) -> Result<CODStatusRegister, Error<I::Error>> {
         let mut buffer = [0u8; 1];
         self.interface
             .write_read(self.addr.into(), &[COD_STATUS], &mut buffer)?;
@@ -751,7 +772,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_tap_status(&mut self) -> Result<TapStatusRegister, I::Error> {
+    pub fn get_tap_status(&mut self) -> Result<TapStatusRegister, Error<I::Error>> {
         let mut buffer: [u8; 1] = [0u8; 1];
         self.interface
             .write_read(self.addr.into(), &[TAP_STATUS], &mut buffer)?;
@@ -767,7 +788,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_step_cnt(&mut self) -> Result<SampleTimeStamp, I::Error> {
+    pub fn get_step_cnt(&mut self) -> Result<SampleTimeStamp, Error<I::Error>> {
         let mut buffer = [0u8; 1];
         let mut timestamp: SampleTimeStamp = 0;
         self.interface
@@ -781,5 +802,128 @@ where
         timestamp |= SampleTimeStamp::from(buffer[0]);
 
         Ok(timestamp)
+    }
+
+    /// Set enable all sensors
+    ///
+    /// # Note:
+    ///
+    /// Bitmask apporach, this doesn't change any other bits
+    ///
+    /// # Errors
+    ///
+    /// This function can return an error if there is an issue during the communication process.
+    ///
+    /// Possible errors include:
+    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    pub fn set_sensors_enable(
+        &mut self,
+        gyroscope: bool,
+        accelrometer: bool,
+    ) -> Result<(), Error<I::Error>> {
+        let mut ctrl7 = self.get_ctrl7()?;
+        ctrl7.set_accelerometer_enable(accelrometer);
+        ctrl7.set_gyroscope_enable(gyroscope);
+        self.set_crtl7(ctrl7)
+    }
+
+    /// Get enabled sensors
+    ///
+    /// # Note:
+    ///
+    /// Bitmask apporach, this doesn't change any other bits
+    ///
+    /// # Errors
+    ///
+    /// This function can return an error if there is an issue during the communication process.
+    ///
+    /// Possible errors include:
+    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    pub fn get_sensors_enable(&mut self) -> Result<(bool, bool), Error<I::Error>> {
+        let ctrl7 = self.get_ctrl7()?;
+        Ok((ctrl7.gyroscope_enable(), ctrl7.accelerometer_enable()))
+    }
+
+    /// On-Demande Calibration Gyroscope
+    ///
+    /// # Errors
+    ///
+    /// This function can return an error if there is an issue during the communication process.
+    ///
+    /// Possible errors include:
+    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    pub fn cmd_on_demande_calibration_gyroscope(&mut self) -> Result<(), Error<I::Error>> {
+        let (gyro_en, acc_en) = self.get_sensors_enable()?;
+
+        self.set_sensors_enable(false, acc_en)?;
+        self.set_crtl9(Ctrl9Register::CtrlCmdOnDemandCalibration)?;
+        self.delay.delay_ms(1500);
+        let cod_status = self.get_cod_status()?;
+        if cod_status.cod_failed() {
+            return Err(Error::CoDFailed);
+        }
+
+        self.set_sensors_enable(gyro_en, acc_en)?;
+        Ok(())
+    }
+
+    /// Change accelerometer offset
+    ///
+    /// # Note
+    ///
+    /// This offset change is lost when the sensor is power cycled, or the system is reset
+    ///
+    /// # Errors
+    ///
+    /// This function can return an error if there is an issue during the communication process.
+    ///
+    /// Possible errors include:
+    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    pub fn cmd_accel_host_delta_offset(
+        &mut self,
+        x: i16,
+        y: i16,
+        z: i16,
+    ) -> Result<(), Error<I::Error>> {
+        let (gyro_en, acc_en) = self.get_sensors_enable()?;
+        self.set_sensors_enable(false, false)?;
+        let mut calibration = CalibrationRegisters::default();
+        calibration.cal1.0 = unsafe { core::mem::transmute(x) };
+        calibration.cal2.0 = unsafe { core::mem::transmute(y) };
+        calibration.cal3.0 = unsafe { core::mem::transmute(z) };
+        self.set_calibration_registers(calibration)?;
+        self.set_crtl9(Ctrl9Register::CtrlCmdAccelHostDeltaOffset)?;
+        self.set_sensors_enable(gyro_en, acc_en)?;
+        Ok(())
+    }
+
+    /// Change gyrsocope offset
+    ///
+    /// # Note
+    ///
+    /// This offset change is lost when the sensor is power cycled, or the system is reset
+    ///
+    /// # Errors
+    ///
+    /// This function can return an error if there is an issue during the communication process.
+    ///
+    /// Possible errors include:
+    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    pub fn cmd_gyro_host_delta_offset(
+        &mut self,
+        x: i16,
+        y: i16,
+        z: i16,
+    ) -> Result<(), Error<I::Error>> {
+        let (gyro_en, acc_en) = self.get_sensors_enable()?;
+        self.set_sensors_enable(false, false)?;
+        let mut calibration = CalibrationRegisters::default();
+        calibration.cal1.0 = unsafe { core::mem::transmute(x) };
+        calibration.cal2.0 = unsafe { core::mem::transmute(y) };
+        calibration.cal3.0 = unsafe { core::mem::transmute(z) };
+        self.set_calibration_registers(calibration)?;
+        self.set_crtl9(Ctrl9Register::CtrlCmdGyroHostDeltaOffset)?;
+        self.set_sensors_enable(gyro_en, acc_en)?;
+        Ok(())
     }
 }

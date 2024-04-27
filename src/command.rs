@@ -672,7 +672,7 @@ pub mod register {
 
         bitfield! {
             /// FIFO Control Register
-            #[derive(Debug, PartialEq, Eq, Clone, Copy)]
+            #[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
             pub struct Calibration(u16);
             #[doc = "HIGH"]
             pub u8, high, set_high: 15, 8;
@@ -681,7 +681,7 @@ pub mod register {
         }
 
         /// Host Controlled Calibration Registers
-        #[derive(Debug, PartialEq, Eq, Clone, Copy)]
+        #[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
         pub struct CalibrationRegisters {
             pub cal1: Calibration,
             pub cal2: Calibration,
