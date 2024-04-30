@@ -210,18 +210,28 @@ pub mod register {
     }
 
     pub mod ctrl1 {
-        use bitfield::bitfield;
+        use bitfield::{bitfield, BitRange, BitRangeMut};
+
+        use crate::define_enum_with_bitrange;
+
+        define_enum_with_bitrange!(IntDirection {
+            /// Output on Int2
+            Int2 = 0b0,
+            /// Output on Int1
+            Int1 = 0b1,
+        });
 
         bitfield! {
             /// Serial Interface and Sensor Enable
-            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+            #[derive(Clone, Copy, PartialEq, Eq)]
             pub struct Ctrl1Register(u8);
+            impl Debug;
             pub bool, sim, set_sim: 7;
             pub bool, addr_ai, set_addr_ai: 6;
             pub bool, be, set_be: 5;
             pub bool, int2_enable, set_int2_enable: 4;
             pub bool, int1_enable, set_int1_enable: 3;
-            pub bool, fifo_int_sel, set_fifo_int_sel: 2;
+            pub IntDirection, fifo_int_sel, set_fifo_int_sel: 2, 2;
             pub bool, reserved, set_reserved: 1;
             pub bool, sensor_disable, set_sensor_disable: 0;
         }
@@ -319,8 +329,9 @@ pub mod register {
 
         bitfield! {
             /// Accelerometer Settings: Address:
-            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+            #[derive(Clone, Copy, PartialEq, Eq)]
             pub struct Ctrl2Register(u8);
+            impl Debug;
             pub bool, ast, set_ast: 7;
             #[doc = "Set Accelerometer Full-scale"]
             pub AccelerometerFS, afs, set_afs: 6, 4;
@@ -478,8 +489,9 @@ pub mod register {
 
         bitfield! {
             /// Gyroscope Settings
-            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+            #[derive(Clone, Copy, PartialEq, Eq)]
             pub struct Ctrl3Register(u8);
+            impl Debug;
             pub bool, ast, set_ast: 7;
             #[doc = "Set Gyroscope Full-scale"]
             pub GyroscopeFS, gfs, set_gfs: 6, 4;
@@ -517,8 +529,9 @@ pub mod register {
 
         bitfield! {
             /// Sensor Data Processing Settings
-            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+            #[derive(Clone, Copy, PartialEq, Eq)]
             pub struct Ctrl5Register(u8);
+            impl Debug;
             #[doc = "Reserved"]
             pub bool, reserved_7, set_reserved_7: 7;
             #[doc = "Set Gyroscope LPF Mode"]
@@ -548,8 +561,9 @@ pub mod register {
 
         bitfield! {
             /// Enable Sensors and COnfigure Data Reads
-            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+            #[derive(Clone, Copy, PartialEq, Eq)]
             pub struct Ctrl7Register(u8);
+            impl Debug;
             #[doc = "Set Sync Sample Enable"]
             pub bool, sync_sample_enable, set_sync_sample_enable: 7;
             #[doc = "Reserved"]
@@ -591,27 +605,27 @@ pub mod register {
 
         bitfield! {
             /// Enable Sensors and COnfigure Data Reads
-            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+            #[derive(Clone, Copy, PartialEq, Eq)]
             pub struct Ctrl8Register(u8);
+            impl Debug;
             #[doc = "Set CTRL9_HandShake_Type"]
             pub HandShakeType, ctrl9_handshake_type, set_ctrl9_handshake_type: 7;
             #[doc = "Set Activity Int Selection\n\
                     ## NOTE: this bit influences the Any/No/Sig-motion, Pedometer, Tap Detection interrupt
             "]
             pub ActivityIntSelect, activity_int_select, set_activity_int_select: 6;
-            #[doc = "Set Data Ready Disabled\n\
-                    DRDY(Data Ready) is enabled, is driven to INT2 pin\n\
-                    DRDY(Data Ready) is disabled, is blocked from the INT2 pin\n\
-            "]
-            pub bool, data_ready_disable, set_data_ready_disable: 5;
-            #[doc = "Set Gyroscope Mode. This bit is effective only when Gyroscope is enabled. Refer to 7.1."]
-            pub GSN, gsn, set_gsn: 4;
             #[doc = "Reserved"]
-            pub u8, reserved_3, set_reserved_3: 3, 2;
-            #[doc = "Set Gyroscope Enable"]
-            pub bool, gyroscope_enable, set_gyroscope_enable: 1;
-            #[doc = "Set Accelerometer Enable"]
-            pub bool, accelerometer_enable, set_accelerometer_enable: 0;
+            pub u8, reserved, set_reserved: 5;
+            #[doc = "Set Pedo Enable"]
+            pub bool, pedo_enable, set_pedo_enable: 4;
+            #[doc = "Set Sig Motion Enable"]
+            pub bool, sig_motion_enable, set_sig_motion_enable: 3;
+            #[doc = "Set No Motion Enable"]
+            pub bool, no_motion_enable, set_no_motion_enable: 2;
+            #[doc = "Set Any Motion Enable"]
+            pub bool, any_motion_enable, set_any_motion_enable: 1;
+            #[doc = "Set Tap Enable"]
+            pub bool, tap_enable, set_tap_enable: 0;
         }
     }
 
@@ -725,9 +739,9 @@ pub mod register {
 
         bitfield! {
             /// FIFO Control Register
-            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+            #[derive(Clone, Copy, PartialEq, Eq)]
             pub struct FIFOControlRegister(u8);
-            ///
+            impl Debug;
             #[doc = "FIFO Read Mode\n\
                     FIFO is in Write mode, sensor data (if enabled) can be filled into FIFO\n\
                     FIFO is in Read mode, FIFO data can be read via FIFO_DATA register\n\
@@ -743,15 +757,7 @@ pub mod register {
     }
 
     pub mod fifo_sample_count {
-        use bitfield::bitfield;
-
-        bitfield! {
-            /// FIFO Sample Count Register
-            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-            pub struct FIFOSampleCountRegister(u8);
-            #[doc = "FIFO Count"]
-            pub bool, fifo_smpl_cnt_lsb: 7, 0;
-        }
+        pub type FIFOSampleCountRegister = u8;
     }
 
     pub mod fifo_status {
@@ -759,8 +765,9 @@ pub mod register {
 
         bitfield! {
             /// FIFO Status Register
-            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+            #[derive(Clone, Copy, PartialEq, Eq)]
             pub struct FIFOStatusRegister(u8);
+            impl Debug;
             #[doc = "FIFO is full"]
             pub bool, fifo_full, set_fifo_full: 7;
             #[doc = "FIFO Water Mark Level is hit"]
@@ -781,8 +788,9 @@ pub mod register {
 
         bitfield! {
             /// FIFO Data Register
-            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+            #[derive(Clone, Copy, PartialEq, Eq)]
             pub struct FIFODataRegister(u8);
+            impl Debug;
             #[doc = "FIFO Data, 8 bit FIFO data output."]
             pub bool, fifo_data: 7, 0;
         }
@@ -795,17 +803,18 @@ pub mod register {
 
         define_enum_with_bitrange!(Ctrl9CmdDone {
             /// Not Completed
-            NotCompleted = 0b00,
+            NotCompleted = 0b0,
             /// Done
-            Done = 0b01,
+            Done = 0b1,
         });
 
         bitfield! {
             /// Sensor Data Available and Lock Register
-            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+            #[derive(Clone, Copy, PartialEq, Eq)]
             pub struct SensorDataAvailableAndLockRegister(u8);
+            impl Debug;
             #[doc = "Indicates CTRL9 Command was done, as part of CTRL9 protocol"]
-            pub Ctrl9CmdDone, ctrl9_cmd_done, set_ctrl9_cmd_done: 7;
+            pub Ctrl9CmdDone, ctrl9_cmd_done, set_ctrl9_cmd_done: 7, 7;
             #[doc = "Reserved"]
             pub u8, reserved_2_6, set_reserved_2_6: 6, 2;
             #[doc = "if `ctrl7.sync_sample_enable` is enabled then `false` sensor data is not locked, \
@@ -818,6 +827,33 @@ pub mod register {
                     if `ctrl7.sync_sample_enable` is disabled then the bit shows the same value of INT2.\n\
             "]
             pub bool, available, set_available: 0;
+        }
+
+        #[cfg(test)]
+        mod test {
+            use bitfield::BitRange;
+
+            use crate::command::register::status_int::{
+                Ctrl9CmdDone, SensorDataAvailableAndLockRegister,
+            };
+
+            #[test]
+            fn test_cmd_done_done() {
+                // Test AFS2G
+                let value_2g: u8 = 0b1000_0000;
+                assert_eq!(
+                    <u8 as BitRange<Ctrl9CmdDone>>::bit_range(&value_2g, 7, 7),
+                    Ctrl9CmdDone::Done
+                );
+            }
+
+            #[test]
+            fn test_cmd_done_read_done() {
+                let register: u8 = 128;
+
+                let data = SensorDataAvailableAndLockRegister(register);
+                assert_eq!(data.ctrl9_cmd_done(), Ctrl9CmdDone::Done);
+            }
         }
     }
 
@@ -835,8 +871,9 @@ pub mod register {
 
         bitfield! {
             /// Output Data Status Register
-            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+            #[derive(Clone, Copy, PartialEq, Eq)]
             pub struct OutputDataStatusRegister(u8);
+            impl Debug;
             #[doc = "Reserved"]
             pub u8, reserved_2_7, set_reserved_2_7: 7, 2;
             #[doc = "Gyroscope new data available"]
@@ -860,8 +897,9 @@ pub mod register {
 
         bitfield! {
             /// Miscellaneous Status Register
-            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+            #[derive(Clone, Copy, PartialEq, Eq)]
             pub struct MiscellaneousStatusRegister(u8);
+            impl Debug;
             #[doc = "Significant Motion\n\
                 * No Significant-Motion was detected\n\
                 * Significant-Motion was detected\n\
@@ -928,34 +966,34 @@ pub mod register {
         pub type AccelerationRegister = u8;
 
         /// Acceleration Register Size
-        pub type AccelerationFullRegister = i16;
+        pub type Acceleration = f32;
 
         /// Angular Register Size
         pub type AngularRegister = u8;
 
         /// Angular Register Size
-        pub type AngularFullRegister = i16;
+        pub type Angular = f32;
 
         /// Acceleration Output. Register Address: 0x35 – 0x3A
-        #[derive(Debug, PartialEq, Eq, Clone, Copy)]
+        #[derive(Debug, PartialEq, Clone, Copy)]
         pub struct AccelerationOutput {
             /// AX
-            pub x: AccelerationFullRegister,
+            pub x: Acceleration,
             /// AY
-            pub y: AccelerationFullRegister,
+            pub y: Acceleration,
             /// AZ
-            pub z: AccelerationFullRegister,
+            pub z: Acceleration,
         }
 
         /// Angular Rate Output. Register Address: 0x3B – 0x40
-        #[derive(Debug, PartialEq, Eq, Clone, Copy)]
+        #[derive(Debug, PartialEq, Clone, Copy)]
         pub struct AngularRateOutput {
             /// AX
-            pub x: AngularFullRegister,
+            pub x: Angular,
             /// AY
-            pub y: AngularFullRegister,
+            pub y: Angular,
             /// AZ
-            pub z: AngularFullRegister,
+            pub z: Angular,
         }
     }
 
@@ -964,8 +1002,9 @@ pub mod register {
 
         bitfield! {
             #[doc = "COD Status Register"]
-            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+            #[derive(Clone, Copy, PartialEq, Eq)]
             pub struct CODStatusRegister(u8);
+            impl Debug;
             #[doc = "COD passed for checking low sensitivity limit of X axis of gyroscope\n\
             COD failed for checking low sensitivity limit of X axis of gyroscope"]
             pub bool, x_limit_l_fail, set_x_limit_l_fail: 7;
@@ -1030,8 +1069,9 @@ pub mod register {
         bitfield! {
             /// Tap Status Register
             #[doc = "Tap Status Register"]
-            #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+            #[derive(Clone, Copy, PartialEq, Eq)]
             pub struct TapStatusRegister(u8);
+            impl Debug;
             #[doc = "Tap was detected on the positive direction of the Tap axis\n\
                     Tap was detected on the negative direction of the Tap axis\
             "]

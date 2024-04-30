@@ -10,19 +10,17 @@ use crate::command::constants::{
     STEP_CNT_MID, TAP_STATUS, TEMP_HIGH, TEMP_LOW, TIMESTAMP_HIGH, TIMESTAMP_LOW, TIMESTAMP_MID,
     WHO_AM_I,
 };
-use crate::command::register::acceleration::{
-    AccelerationFullRegister, AccelerationOutput, AngularFullRegister, AngularRateOutput,
-};
+use crate::command::register::acceleration::{AccelerationOutput, AngularRateOutput};
 use crate::command::register::cal::{Calibration, CalibrationRegisters};
 use crate::command::register::cod_status::CODStatusRegister;
-use crate::command::register::ctrl1::Ctrl1Register;
-use crate::command::register::ctrl2::Ctrl2Register;
-use crate::command::register::ctrl3::Ctrl3Register;
+use crate::command::register::ctrl1::{Ctrl1Register, IntDirection};
+use crate::command::register::ctrl2::{AccelerometerFS, Ctrl2Register};
+use crate::command::register::ctrl3::{Ctrl3Register, GyroscopeFS};
 use crate::command::register::ctrl5::Ctrl5Register;
 use crate::command::register::ctrl7::Ctrl7Register;
 use crate::command::register::ctrl8::Ctrl8Register;
 use crate::command::register::ctrl9::Ctrl9Register;
-use crate::command::register::fifo_ctrl::FIFOControlRegister;
+use crate::command::register::fifo_ctrl::{FIFOControlRegister, FIFOMode, FIFOSize};
 use crate::command::register::fifo_data::FIFODataRegister;
 use crate::command::register::fifo_sample_count::FIFOSampleCountRegister;
 use crate::command::register::fifo_status::FIFOStatusRegister;
@@ -30,7 +28,7 @@ use crate::command::register::fifo_wtm_th::FIFOWTMRegister;
 use crate::command::register::ship_info::{DeviceID, RevisionID};
 use crate::command::register::status_0::OutputDataStatusRegister;
 use crate::command::register::status_1::MiscellaneousStatusRegister;
-use crate::command::register::status_int::SensorDataAvailableAndLockRegister;
+use crate::command::register::status_int::{Ctrl9CmdDone, SensorDataAvailableAndLockRegister};
 use crate::command::register::tap_status::TapStatusRegister;
 use crate::command::register::temp::Temperature;
 use crate::command::register::timestamp::SampleTimeStamp;
@@ -68,6 +66,10 @@ pub enum Error<E> {
     CoDFailed,
     /// Gyroscope Startup Failed
     GyroscopeFailed,
+    /// Host command Failed,
+    CmdFailed,
+    /// Host command Failed,
+    CmdAckFailed,
 }
 
 impl<E> From<E> for Error<E> {
@@ -84,6 +86,10 @@ pub struct Qmi8658<I, D> {
     pub(crate) addr: DeviceAddress,
     /// Delay
     pub(crate) delay: D,
+    /// Gyroscope Scale
+    pub(crate) gyroscope_scale: f32,
+    /// Accelerometer Scale
+    pub(crate) accelerometer_scale: f32,
 }
 
 // #[derive(Clone, Debug)]
@@ -103,6 +109,8 @@ where
             interface,
             addr: DeviceAddress::Primary,
             delay,
+            gyroscope_scale: 0.,
+            accelerometer_scale: 0.,
         }
     }
 
@@ -112,6 +120,8 @@ where
             interface,
             addr: DeviceAddress::Secondary,
             delay,
+            gyroscope_scale: 0.,
+            accelerometer_scale: 0.,
         }
     }
 
@@ -231,6 +241,15 @@ where
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
     pub fn set_crtl2(&mut self, value: Ctrl2Register) -> Result<(), Error<I::Error>> {
         self.write_register(CTRL2, value.0)?;
+
+        // Calculate G/ADC(tick)
+        self.accelerometer_scale = match value.afs() {
+            AccelerometerFS::FS2G => 2.0 / 32768.0,
+            AccelerometerFS::FS4G => 4.0 / 32768.0,
+            AccelerometerFS::FS8G => 8.0 / 32768.0,
+            AccelerometerFS::FS16G => 16.0 / 32768.0,
+        };
+
         Ok(())
     }
 
@@ -260,6 +279,19 @@ where
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
     pub fn set_crtl3(&mut self, value: Ctrl3Register) -> Result<(), Error<I::Error>> {
         self.write_register(CTRL3, value.0)?;
+
+        // Calculate DPS/ADC(tick)
+        self.gyroscope_scale = match value.gfs() {
+            GyroscopeFS::DPS16 => 16.0 / 32768.0,
+            GyroscopeFS::DPS32 => 32.0 / 32768.0,
+            GyroscopeFS::DPS64 => 64.0 / 32768.0,
+            GyroscopeFS::DPS128 => 128.0 / 32768.0,
+            GyroscopeFS::DPS256 => 256.0 / 32768.0,
+            GyroscopeFS::DPS512 => 512.0 / 32768.0,
+            GyroscopeFS::DPS1024 => 1024.0 / 32768.0,
+            GyroscopeFS::DPS2048 => 2048.0 / 32768.0,
+        };
+
         Ok(())
     }
 
@@ -411,7 +443,9 @@ where
         Ok(())
     }
 
-    /// FIFO Watermark Register Address
+    /// Get FIFO Watermark Register Address
+    ///
+    /// Number of ODRs(Samples) needed to trigger FIFO watermark
     ///
     /// # Errors
     ///
@@ -427,7 +461,21 @@ where
         Ok(buffer[0])
     }
 
-    /// FIFO Control Register Address
+    /// Set FIFO Watermark Register Address
+    ///
+    /// Number of ODRs(Samples) needed to trigger FIFO watermark
+    ///
+    /// # Errors
+    ///
+    /// This function can return an error if there is an issue during the communication process.
+    ///
+    /// Possible errors include:
+    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    pub fn set_fifo_wtm(&mut self, value: FIFOWTMRegister) -> Result<(), Error<I::Error>> {
+        self.write_register(FIFO_WTM_TH, value)
+    }
+
+    /// Get FIFO Control Register Address
     ///
     /// # Errors
     ///
@@ -443,6 +491,18 @@ where
         Ok(FIFOControlRegister(buffer[0]))
     }
 
+    /// Set FIFO Control Register Address
+    ///
+    /// # Errors
+    ///
+    /// This function can return an error if there is an issue during the communication process.
+    ///
+    /// Possible errors include:
+    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    pub fn set_fifo_ctrl(&mut self, value: FIFOControlRegister) -> Result<(), Error<I::Error>> {
+        self.write_register(FIFO_CTRL, value.0)
+    }
+
     /// FIFO Sample Count Register Address
     ///
     /// # Errors
@@ -451,12 +511,12 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_fifo_sample_cnt(&mut self) -> Result<FIFOSampleCountRegister, Error<I::Error>> {
+    fn _get_fifo_sample_cnt(&mut self) -> Result<FIFOSampleCountRegister, Error<I::Error>> {
         let mut buffer = [0u8; 1];
         self.interface
             .write_read(self.addr.into(), &[FIFO_SMPL_CNT], &mut buffer)?;
 
-        Ok(FIFOSampleCountRegister(buffer[0]))
+        Ok(buffer[0])
     }
 
     /// FIFO Status
@@ -601,16 +661,33 @@ where
         &mut self,
         high_addr: u8,
         low_addr: u8,
-    ) -> Result<AccelerationFullRegister, Error<I::Error>> {
+    ) -> Result<i16, Error<I::Error>> {
         let mut buffer = [0u8; 1];
-        let mut tmp: AccelerationFullRegister = 0;
+        let mut tmp: i16 = 0;
         self.interface
             .write_read(self.addr.into(), &[high_addr], &mut buffer)?;
-        tmp |= AccelerationFullRegister::from(buffer[0]) << 8;
+        tmp |= i16::from(buffer[0]) << 8;
         self.interface
             .write_read(self.addr.into(), &[low_addr], &mut buffer)?;
-        tmp |= AccelerationFullRegister::from(buffer[0]);
+        tmp |= i16::from(buffer[0]);
         Ok(tmp)
+    }
+
+    /// Get Acceleration Output Raw
+    ///
+    /// # Errors
+    ///
+    /// This function can return an error if there is an issue during the communication process.
+    ///
+    /// Possible errors include:
+    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    #[allow(clippy::cast_lossless)]
+    pub fn get_acceleration_raw(&mut self) -> Result<AccelerationOutput, Error<I::Error>> {
+        Ok(AccelerationOutput {
+            x: self.get_acceleration_helper(AX_HIGH, AX_LOW)? as f32,
+            y: self.get_acceleration_helper(AY_HIGH, AX_LOW)? as f32,
+            z: self.get_acceleration_helper(AZ_HIGH, AZ_LOW)? as f32,
+        })
     }
 
     /// Get Acceleration Output
@@ -621,11 +698,12 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    #[allow(clippy::cast_lossless)]
     pub fn get_acceleration(&mut self) -> Result<AccelerationOutput, Error<I::Error>> {
         Ok(AccelerationOutput {
-            x: self.get_acceleration_helper(AX_HIGH, AX_LOW)?,
-            y: self.get_acceleration_helper(AY_HIGH, AX_LOW)?,
-            z: self.get_acceleration_helper(AZ_HIGH, AZ_LOW)?,
+            x: self.get_acceleration_helper(AX_HIGH, AX_LOW)? as f32 * self.accelerometer_scale,
+            y: self.get_acceleration_helper(AY_HIGH, AX_LOW)? as f32 * self.accelerometer_scale,
+            z: self.get_acceleration_helper(AZ_HIGH, AZ_LOW)? as f32 * self.accelerometer_scale,
         })
     }
 
@@ -641,16 +719,33 @@ where
         &mut self,
         high_addr: u8,
         low_addr: u8,
-    ) -> Result<AngularFullRegister, Error<I::Error>> {
+    ) -> Result<i16, Error<I::Error>> {
         let mut buffer = [0u8; 1];
-        let mut tmp: AngularFullRegister = 0;
+        let mut tmp: i16 = 0;
         self.interface
             .write_read(self.addr.into(), &[high_addr], &mut buffer)?;
-        tmp |= AngularFullRegister::from(buffer[0]) << 8;
+        tmp |= i16::from(buffer[0]) << 8;
         self.interface
             .write_read(self.addr.into(), &[low_addr], &mut buffer)?;
-        tmp |= AngularFullRegister::from(buffer[0]);
+        tmp |= i16::from(buffer[0]);
         Ok(tmp)
+    }
+
+    /// Get Angular Rate Output Raw
+    ///
+    /// # Errors
+    ///
+    /// This function can return an error if there is an issue during the communication process.
+    ///
+    /// Possible errors include:
+    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    #[allow(clippy::cast_lossless)]
+    pub fn get_angular_rate_raw(&mut self) -> Result<AngularRateOutput, Error<I::Error>> {
+        Ok(AngularRateOutput {
+            x: self.get_angular_rate_helper(GX_HIGH, GX_LOW)? as f32,
+            y: self.get_angular_rate_helper(GY_HIGH, GY_LOW)? as f32,
+            z: self.get_angular_rate_helper(GZ_HIGH, GZ_LOW)? as f32,
+        })
     }
 
     /// Get Angular Rate Output
@@ -661,11 +756,12 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    #[allow(clippy::cast_lossless)]
     pub fn get_angular_rate(&mut self) -> Result<AngularRateOutput, Error<I::Error>> {
         Ok(AngularRateOutput {
-            x: self.get_angular_rate_helper(GX_HIGH, GX_LOW)?,
-            y: self.get_angular_rate_helper(GY_HIGH, GY_LOW)?,
-            z: self.get_angular_rate_helper(GZ_HIGH, GZ_LOW)?,
+            x: self.get_angular_rate_helper(GX_HIGH, GX_LOW)? as f32 * self.gyroscope_scale,
+            y: self.get_angular_rate_helper(GY_HIGH, GY_LOW)? as f32 * self.gyroscope_scale,
+            z: self.get_angular_rate_helper(GZ_HIGH, GZ_LOW)? as f32 * self.gyroscope_scale,
         })
     }
 
@@ -852,11 +948,12 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    /// - Driver's error: This can occur if the `Ctrl9Register` host command doesn't acknowledge properly during the command process.
     pub fn cmd_on_demande_calibration_gyroscope(&mut self) -> Result<(), Error<I::Error>> {
         let (gyro_en, acc_en) = self.get_sensors_enable()?;
 
         self.set_sensors_enable(false, acc_en)?;
-        self.set_crtl9(Ctrl9Register::CtrlCmdOnDemandCalibration)?;
+        self.send_command(Ctrl9Register::CtrlCmdOnDemandCalibration)?;
         self.delay.delay_ms(1500);
         let cod_status = self.get_cod_status()?;
         if cod_status.cod_failed() {
@@ -879,6 +976,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    /// - Driver's error: This can occur if the `Ctrl9Register` host command doesn't acknowledge properly during the command process.
     pub fn cmd_accel_host_delta_offset(
         &mut self,
         x: i16,
@@ -892,7 +990,7 @@ where
         calibration.cal2.0 = unsafe { core::mem::transmute(y) };
         calibration.cal3.0 = unsafe { core::mem::transmute(z) };
         self.set_calibration_registers(calibration)?;
-        self.set_crtl9(Ctrl9Register::CtrlCmdAccelHostDeltaOffset)?;
+        self.send_command(Ctrl9Register::CtrlCmdAccelHostDeltaOffset)?;
         self.set_sensors_enable(gyro_en, acc_en)?;
         Ok(())
     }
@@ -909,6 +1007,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    /// - Driver's error: This can occur if the `Ctrl9Register` host command doesn't acknowledge properly during the command process.
     pub fn cmd_gyro_host_delta_offset(
         &mut self,
         x: i16,
@@ -922,8 +1021,239 @@ where
         calibration.cal2.0 = unsafe { core::mem::transmute(y) };
         calibration.cal3.0 = unsafe { core::mem::transmute(z) };
         self.set_calibration_registers(calibration)?;
-        self.set_crtl9(Ctrl9Register::CtrlCmdGyroHostDeltaOffset)?;
+        self.send_command(Ctrl9Register::CtrlCmdGyroHostDeltaOffset)?;
         self.set_sensors_enable(gyro_en, acc_en)?;
+        Ok(())
+    }
+
+    /// Get FIFO Sample Count (MSB+LSB)
+    ///
+    ///  # Errors
+    ///
+    /// This function can return an error if there is an issue during the communication process.
+    ///
+    /// Possible errors include:
+    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    #[allow(clippy::cast_lossless)]
+    pub fn get_fifo_sample_cnt(&mut self) -> Result<u16, Error<I::Error>> {
+        let fifo_smpl_cnt_lsb = self._get_fifo_sample_cnt()? as u16;
+        let fifo_smpl_cnt_msb = self.get_fifo_status()?.fifo_smpl_cnt_msb() as u16;
+        Ok(2 * ((fifo_smpl_cnt_msb * 256) + fifo_smpl_cnt_lsb))
+    }
+
+    /// Get Angular Rate Output Helper from FIFO
+    ///
+    /// # Errors
+    ///
+    /// This function can return an error if there is an issue during the communication process.
+    ///
+    /// Possible errors include:
+    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    fn get_angular_rate_from_fifo_data_helper(&mut self) -> Result<i16, Error<I::Error>> {
+        let mut buffer = [0u8; 1];
+        let mut tmp: i16 = 0;
+        self.interface
+            .write_read(self.addr.into(), &[FIFO_DATA], &mut buffer)?;
+        tmp |= i16::from(buffer[0]);
+        self.interface
+            .write_read(self.addr.into(), &[FIFO_DATA], &mut buffer)?;
+        tmp |= i16::from(buffer[0]) << 8;
+
+        Ok(tmp)
+    }
+
+    /// Get Angular Rate Output
+    ///
+    /// # Errors
+    ///
+    /// This function can return an error if there is an issue during the communication process.
+    ///
+    /// Possible errors include:
+    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    #[allow(clippy::cast_lossless)]
+    pub fn get_angular_rate_from_fifo_data(
+        &mut self,
+    ) -> Result<AngularRateOutput, Error<I::Error>> {
+        Ok(AngularRateOutput {
+            x: self.get_angular_rate_from_fifo_data_helper()? as f32 * self.gyroscope_scale,
+            y: self.get_angular_rate_from_fifo_data_helper()? as f32 * self.gyroscope_scale,
+            z: self.get_angular_rate_from_fifo_data_helper()? as f32 * self.gyroscope_scale,
+        })
+    }
+
+    /// Get Acceleration Output Helper from FIFO
+    ///
+    /// # Errors
+    ///
+    /// This function can return an error if there is an issue during the communication process.
+    ///
+    /// Possible errors include:
+    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    fn get_acceleration_from_fifo_data_helper(&mut self) -> Result<i16, Error<I::Error>> {
+        let mut buffer = [0u8; 1];
+        let mut tmp: i16 = 0;
+        self.interface
+            .write_read(self.addr.into(), &[FIFO_DATA], &mut buffer)?;
+        tmp |= i16::from(buffer[0]);
+        self.interface
+            .write_read(self.addr.into(), &[FIFO_DATA], &mut buffer)?;
+        tmp |= i16::from(buffer[0]) << 8;
+
+        Ok(tmp)
+    }
+
+    /// Get Acceleration Output
+    ///
+    /// # Errors
+    ///
+    /// This function can return an error if there is an issue during the communication process.
+    ///
+    /// Possible errors include:
+    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    #[allow(clippy::cast_lossless)]
+    pub fn get_acceleration_from_fifo_data(
+        &mut self,
+    ) -> Result<AccelerationOutput, Error<I::Error>> {
+        Ok(AccelerationOutput {
+            x: self.get_acceleration_from_fifo_data_helper()? as f32 * self.accelerometer_scale,
+            y: self.get_acceleration_from_fifo_data_helper()? as f32 * self.accelerometer_scale,
+            z: self.get_acceleration_from_fifo_data_helper()? as f32 * self.accelerometer_scale,
+        })
+    }
+
+    /// Read FIFO Data
+    ///
+    /// # Note
+    ///
+    /// Got FIFO watermark interrupt by INT pin or polling the `FIFO_STATUS` register (`FIFO_WTM` and/or `FIFO_FULL`)
+    ///
+    /// # Errors
+    ///
+    /// This function can return an error if there is an issue during the communication process.
+    ///
+    /// Possible errors include:
+    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    /// - Driver's error: This can occur if the `Ctrl9Register` host command doesn't acknowledge properly during the command process.
+    pub fn read_fifo_data<F>(&mut self, func: F) -> Result<(), Error<I::Error>>
+    where
+        F: Fn(u16, Option<AccelerationOutput>, Option<AngularRateOutput>),
+    {
+        let sample_cnt = self.get_fifo_sample_cnt()?;
+        let (gyro_en, acc_en) = self.get_sensors_enable()?;
+
+        // Send CTRL_CMD_REQ_FIFO (0x05) by CTRL9 command, to enable FIFO read mode.
+        // Refer to CTRL_CMD_REQ_FIFO for details.
+        self.send_command(Ctrl9Register::CtrlCmdReqFifo)?;
+
+        for i in 0..sample_cnt {
+            match (gyro_en, acc_en) {
+                (true, true) => {
+                    // this line will collect the acceleration output registers
+                    let acceleration = self.get_acceleration_from_fifo_data()?;
+                    // this line will collect the gyroscope output registers
+                    let angular_rate = self.get_angular_rate_from_fifo_data()?;
+                    func(i, Some(acceleration), Some(angular_rate));
+                }
+                (false, true) => {
+                    // this line will collect the acceleration output registers
+                    let acceleration = self.get_acceleration_from_fifo_data()?;
+                    func(i, Some(acceleration), None);
+                }
+                (true, false) => {
+                    // this line will collect the gyroscope output registers
+                    let angular_rate = self.get_angular_rate_from_fifo_data()?;
+                    func(i, None, Some(angular_rate));
+                }
+                _ => {}
+            }
+        }
+
+        //  Disable the FIFO Read Mode by setting FIFO_CTRL.FIFO_rd_mode to 0.
+        // New data will be filled into FIFO afterwards.
+        let mut fifo_ctrl = self.get_fifo_ctrl()?;
+        fifo_ctrl.set_fifo_rd_mode(false);
+        self.set_fifo_ctrl(fifo_ctrl)?;
+
+        Ok(())
+    }
+
+    /// Configure the FIFO
+    ///
+    /// # Errors
+    ///
+    /// This function can return an error if there is an issue during the communication process.
+    ///
+    /// Possible errors include:
+    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    /// - Driver's error: This can occur if the `Ctrl9Register` host command doesn't acknowledge properly during the command process.
+    pub fn config_fifo(
+        &mut self,
+        fifo_mode: FIFOMode,
+        fifo_size: FIFOSize,
+        fifo_int_dir: IntDirection,
+        threshold: FIFOWTMRegister,
+    ) -> Result<(), Error<I::Error>> {
+        let (gyro_en, acc_en) = self.get_sensors_enable()?;
+        self.set_sensors_enable(false, false)?;
+
+        let mut ctrl1 = self.get_crtl1()?;
+        ctrl1.set_fifo_int_sel(fifo_int_dir);
+        self.set_crtl1(ctrl1)?;
+
+        let mut fifo_ctrl = FIFOControlRegister(0);
+        fifo_ctrl.set_fifo_mode(fifo_mode);
+        fifo_ctrl.set_fifo_size(fifo_size);
+        self.set_fifo_ctrl(fifo_ctrl)?;
+
+        self.set_fifo_wtm(threshold)?;
+
+        self.send_command(Ctrl9Register::CtrlCmdRstFifo)?;
+
+        self.set_sensors_enable(gyro_en, acc_en)?;
+
+        Ok(())
+    }
+
+    /// Send Command
+    ///
+    /// # Errors
+    ///
+    /// This function can return an error if there is an issue during the communication process.
+    ///
+    /// Possible errors include:
+    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    /// - Driver's error: This can occur if the `Ctrl9Register` host command doesn't acknowledge properly during the command process.
+    pub fn send_command(&mut self, value: Ctrl9Register) -> Result<(), Error<I::Error>> {
+        let mut try_count = 0;
+
+        self.set_crtl9(value)?;
+
+        loop {
+            let value = self.get_sensor_data_available_and_lock()?;
+            if value.ctrl9_cmd_done() == Ctrl9CmdDone::Done {
+                break;
+            }
+            if try_count >= 1000 {
+                return Err(Error::CmdFailed);
+            }
+            self.delay.delay_ms(1);
+            try_count += 1;
+        }
+
+        self.set_crtl9(Ctrl9Register::CtrlCmdAck)?;
+
+        loop {
+            let value = self.get_sensor_data_available_and_lock()?;
+            if value.ctrl9_cmd_done() == Ctrl9CmdDone::NotCompleted {
+                break;
+            }
+            if try_count >= 1000 {
+                return Err(Error::CmdAckFailed);
+            }
+            self.delay.delay_ms(1);
+            try_count += 1;
+        }
+
         Ok(())
     }
 }
