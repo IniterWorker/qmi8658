@@ -377,7 +377,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn set_crtl8(&mut self, value: &Ctrl8Register) -> Result<(), Error<I::Error>> {
+    pub fn set_crtl8(&mut self, value: Ctrl8Register) -> Result<(), Error<I::Error>> {
         self.write_register(CTRL8, value.0)?;
         Ok(())
     }

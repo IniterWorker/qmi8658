@@ -492,7 +492,7 @@ pub mod register {
             #[derive(Clone, Copy, PartialEq, Eq)]
             pub struct Ctrl3Register(u8);
             impl Debug;
-            pub bool, ast, set_ast: 7;
+            pub bool, gst, set_gst: 7;
             #[doc = "Set Gyroscope Full-scale"]
             pub GyroscopeFS, gfs, set_gfs: 6, 4;
             #[doc = "Set Gyroscope Output Data Rate (ODR)"]
@@ -975,7 +975,7 @@ pub mod register {
         pub type Angular = f32;
 
         /// Acceleration Output. Register Address: 0x35 – 0x3A
-        #[derive(Debug, PartialEq, Clone, Copy)]
+        #[derive(Debug, Default, PartialEq, Clone, Copy)]
         pub struct AccelerationOutput {
             /// AX
             pub x: Acceleration,
@@ -986,7 +986,7 @@ pub mod register {
         }
 
         /// Angular Rate Output. Register Address: 0x3B – 0x40
-        #[derive(Debug, PartialEq, Clone, Copy)]
+        #[derive(Default, Debug, PartialEq, Clone, Copy)]
         pub struct AngularRateOutput {
             /// AX
             pub x: Angular,
