@@ -63,8 +63,8 @@ pub mod command;
 pub mod prelude;
 
 mod bitfield_helper;
-
 mod driver;
+mod fraction_helper;
 
 // export the driver and interface
 pub use driver::Qmi8658;

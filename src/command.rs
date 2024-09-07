@@ -411,12 +411,34 @@ pub mod register {
             }
 
             #[test]
+            fn test_struct_bit_range_bis() {
+                let register: u8 = 0b0000_0111;
+
+                let data = Ctrl2Register(register);
+                assert!(!data.ast());
+                assert_eq!(data.afs(), AccelerometerFS::FS2G);
+                assert_eq!(data.aodr(), AccelerometerODR::NormalAODR7);
+            }
+
+            #[test]
             fn test_struct_set_bit_range() {
                 let register_result: u8 = 0b1000_0111;
                 let register_default: u8 = 0b0000_0000;
 
                 let mut data = Ctrl2Register(register_default);
                 data.set_ast(true);
+                data.set_afs(AccelerometerFS::FS2G);
+                data.set_aodr(AccelerometerODR::NormalAODR7);
+                assert_eq!(data.0, register_result);
+            }
+
+            #[test]
+            fn test_struct_set_bit_range_bis() {
+                let register_result: u8 = 0b0000_0111;
+                let register_default: u8 = 0b0000_0000;
+
+                let mut data = Ctrl2Register(register_default);
+                data.set_ast(false);
                 data.set_afs(AccelerometerFS::FS2G);
                 data.set_aodr(AccelerometerODR::NormalAODR7);
                 assert_eq!(data.0, register_result);
@@ -493,11 +515,119 @@ pub mod register {
             #[derive(Clone, Copy, PartialEq, Eq)]
             pub struct Ctrl3Register(u8);
             impl Debug;
+            #[doc = "Set Gyroscope Self-Test Enable/Disable"]
             pub bool, gst, set_gst: 7;
             #[doc = "Set Gyroscope Full-scale"]
             pub GyroscopeFS, gfs, set_gfs: 6, 4;
             #[doc = "Set Gyroscope Output Data Rate (ODR)"]
             pub GyroscopeODR, godr, set_godr: 3, 0;
+        }
+
+        #[cfg(test)]
+        mod test {
+            use bitfield::{BitRange, BitRangeMut};
+
+            use super::Ctrl3Register;
+            use super::GyroscopeFS;
+            use super::GyroscopeODR;
+
+            #[test]
+            fn test_gfs_bit_range() {
+                // Test DPS16
+                let value_dps16: u8 = 0b0000_0000;
+                assert_eq!(
+                    <u8 as BitRange<GyroscopeFS>>::bit_range(&value_dps16, 6, 4),
+                    GyroscopeFS::DPS16
+                );
+
+                // Test DPS32
+                let value_dps32: u8 = 0b0001_0000;
+                assert_eq!(
+                    <u8 as BitRange<GyroscopeFS>>::bit_range(&value_dps32, 6, 4),
+                    GyroscopeFS::DPS32
+                );
+
+                // Test DPS64
+                let value_dps64: u8 = 0b0010_0000;
+                assert_eq!(
+                    <u8 as BitRange<GyroscopeFS>>::bit_range(&value_dps64, 6, 4),
+                    GyroscopeFS::DPS64
+                );
+
+                // Test DPS128
+                let value_dps128: u8 = 0b0011_0000;
+                assert_eq!(
+                    <u8 as BitRange<GyroscopeFS>>::bit_range(&value_dps128, 6, 4),
+                    GyroscopeFS::DPS128
+                );
+
+                // Test DPS256
+                let value_dps256: u8 = 0b0100_0000;
+                assert_eq!(
+                    <u8 as BitRange<GyroscopeFS>>::bit_range(&value_dps256, 6, 4),
+                    GyroscopeFS::DPS256
+                );
+
+                // Test DPS512
+                let value_dps512: u8 = 0b0101_0000;
+                assert_eq!(
+                    <u8 as BitRange<GyroscopeFS>>::bit_range(&value_dps512, 6, 4),
+                    GyroscopeFS::DPS512
+                );
+
+                // Test DPS1024
+                let value_dps1024: u8 = 0b0110_0000;
+                assert_eq!(
+                    <u8 as BitRange<GyroscopeFS>>::bit_range(&value_dps1024, 6, 4),
+                    GyroscopeFS::DPS1024
+                );
+
+                // Test DPS2048
+                let value_dps2048: u8 = 0b0111_0000;
+                assert_eq!(
+                    <u8 as BitRange<GyroscopeFS>>::bit_range(&value_dps2048, 6, 4),
+                    GyroscopeFS::DPS2048
+                );
+            }
+
+            #[test]
+            fn test_gfs_set_bit_range() {
+                let mut value: u8 = 0;
+
+                // Set DPS16
+                value.set_bit_range(6, 4, GyroscopeFS::DPS16);
+                assert_eq!(value, 0b0000_0000);
+
+                // Set DPS32
+                value.set_bit_range(6, 4, GyroscopeFS::DPS32);
+                assert_eq!(value, 0b0001_0000);
+
+                // Set DPS32
+                value.set_bit_range(6, 4, GyroscopeFS::DPS64);
+                assert_eq!(value, 0b0010_0000);
+            }
+
+            #[test]
+            fn test_struct_bit_range() {
+                let register: u8 = 0b1000_0111;
+
+                let data = Ctrl3Register(register);
+                assert!(data.gst());
+                assert_eq!(data.gfs(), GyroscopeFS::DPS16);
+                assert_eq!(data.godr(), GyroscopeODR::NormalGORD7);
+            }
+
+            #[test]
+            fn test_struct_set_bit_range() {
+                let register_result: u8 = 0b1000_0111;
+                let register_default: u8 = 0b0000_0000;
+
+                let mut data = Ctrl3Register(register_default);
+                data.set_gst(true);
+                data.set_gfs(GyroscopeFS::DPS16);
+                data.set_godr(GyroscopeODR::NormalGORD7);
+                assert_eq!(data.0, register_result);
+            }
         }
     }
 
@@ -854,6 +984,14 @@ pub mod register {
 
                 let data = SensorDataAvailableAndLockRegister(register);
                 assert_eq!(data.ctrl9_cmd_done(), Ctrl9CmdDone::Done);
+            }
+
+            #[test]
+            fn test_cmd_available_read() {
+                let register: u8 = 0b0000_0001;
+
+                let data = SensorDataAvailableAndLockRegister(register);
+                assert!(data.available());
             }
         }
     }

@@ -5,10 +5,10 @@ use embedded_hal::i2c::{I2c, SevenBitAddress};
 use crate::command::constants::{
     AX_HIGH, AX_LOW, AY_HIGH, AZ_HIGH, AZ_LOW, CAL1_HIGH, CAL1_LOW, CAL2_HIGH, CAL2_LOW, CAL3_HIGH,
     CAL3_LOW, CAL4_HIGH, CAL4_LOW, COD_STATUS, CTRL1, CTRL2, CTRL3, CTRL5, CTRL7, CTRL8, CTRL9,
-    FIFO_CTRL, FIFO_DATA, FIFO_SMPL_CNT, FIFO_STATUS, FIFO_WTM_TH, GX_HIGH, GX_LOW, GY_HIGH,
-    GY_LOW, GZ_HIGH, GZ_LOW, RESET, STATUS0, STATUS1, STATUSINT, STEP_CNT_HIGH, STEP_CNT_LOW,
-    STEP_CNT_MID, TAP_STATUS, TEMP_HIGH, TEMP_LOW, TIMESTAMP_HIGH, TIMESTAMP_LOW, TIMESTAMP_MID,
-    WHO_AM_I,
+    D_VX_HIGH, D_VX_LOW, D_VY_HIGH, D_VY_LOW, D_VZ_HIGH, D_VZ_LOW, FIFO_CTRL, FIFO_DATA,
+    FIFO_SMPL_CNT, FIFO_STATUS, FIFO_WTM_TH, GX_HIGH, GX_LOW, GY_HIGH, GY_LOW, GZ_HIGH, GZ_LOW,
+    RESET, REVISION_ID, STATUS0, STATUS1, STATUSINT, STEP_CNT_HIGH, STEP_CNT_LOW, STEP_CNT_MID,
+    TAP_STATUS, TEMP_HIGH, TEMP_LOW, TIMESTAMP_HIGH, TIMESTAMP_LOW, TIMESTAMP_MID, WHO_AM_I,
 };
 use crate::command::register::acceleration::{AccelerationOutput, AngularRateOutput};
 use crate::command::register::cal::{Calibration, CalibrationRegisters};
@@ -32,6 +32,7 @@ use crate::command::register::status_int::{Ctrl9CmdDone, SensorDataAvailableAndL
 use crate::command::register::tap_status::TapStatusRegister;
 use crate::command::register::temp::Temperature;
 use crate::command::register::timestamp::SampleTimeStamp;
+use crate::fraction_helper::{abs_f32, to_signed_u12_4_f32};
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy)]
@@ -70,6 +71,8 @@ pub enum Error<E> {
     CmdFailed,
     /// Host command Failed,
     CmdAckFailed,
+    /// Gyroscope Self-Test Failed
+    GyroscopeSelfTestFailed,
 }
 
 impl<E> From<E> for Error<E> {
@@ -181,7 +184,7 @@ where
     pub fn get_device_revision_id(&mut self) -> Result<RevisionID, Error<I::Error>> {
         let mut buffer = [0u8; 1];
         self.interface
-            .write_read(self.addr.into(), &[WHO_AM_I], &mut buffer)?;
+            .write_read(self.addr.into(), &[REVISION_ID], &mut buffer)?;
 
         Ok(buffer[0])
     }
@@ -194,7 +197,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_crtl1(&mut self) -> Result<Ctrl1Register, Error<I::Error>> {
+    pub fn get_ctrl1(&mut self) -> Result<Ctrl1Register, Error<I::Error>> {
         let mut buffer = [0u8; 1];
         self.interface
             .write_read(self.addr.into(), &[CTRL1], &mut buffer)?;
@@ -210,7 +213,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn set_crtl1(&mut self, value: Ctrl1Register) -> Result<(), Error<I::Error>> {
+    pub fn set_ctrl1(&mut self, value: Ctrl1Register) -> Result<(), Error<I::Error>> {
         self.write_register(CTRL1, value.0)?;
         Ok(())
     }
@@ -239,7 +242,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn set_crtl2(&mut self, value: Ctrl2Register) -> Result<(), Error<I::Error>> {
+    pub fn set_ctrl2(&mut self, value: Ctrl2Register) -> Result<(), Error<I::Error>> {
         self.write_register(CTRL2, value.0)?;
 
         // Calculate G/ADC(tick)
@@ -277,7 +280,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn set_crtl3(&mut self, value: Ctrl3Register) -> Result<(), Error<I::Error>> {
+    pub fn set_ctrl3(&mut self, value: Ctrl3Register) -> Result<(), Error<I::Error>> {
         self.write_register(CTRL3, value.0)?;
 
         // Calculate DPS/ADC(tick)
@@ -319,7 +322,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn set_crtl5(&mut self, value: Ctrl5Register) -> Result<(), Error<I::Error>> {
+    pub fn set_ctrl5(&mut self, value: Ctrl5Register) -> Result<(), Error<I::Error>> {
         self.write_register(CTRL5, value.0)?;
         Ok(())
     }
@@ -348,7 +351,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn set_crtl7(&mut self, value: Ctrl7Register) -> Result<(), Error<I::Error>> {
+    pub fn set_ctrl7(&mut self, value: Ctrl7Register) -> Result<(), Error<I::Error>> {
         self.write_register(CTRL7, value.0)?;
         Ok(())
     }
@@ -377,7 +380,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn set_crtl8(&mut self, value: Ctrl8Register) -> Result<(), Error<I::Error>> {
+    pub fn set_ctrl8(&mut self, value: Ctrl8Register) -> Result<(), Error<I::Error>> {
         self.write_register(CTRL8, value.0)?;
         Ok(())
     }
@@ -425,7 +428,7 @@ where
     ///
     /// Possible errors include:
     /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn set_crtl9(&mut self, value: Ctrl9Register) -> Result<(), Error<I::Error>> {
+    pub fn set_ctrl9(&mut self, value: Ctrl9Register) -> Result<(), Error<I::Error>> {
         self.write_register(CTRL9, value as u8)?;
         Ok(())
     }
@@ -759,9 +762,26 @@ where
     #[allow(clippy::cast_lossless)]
     pub fn get_angular_rate(&mut self) -> Result<AngularRateOutput, Error<I::Error>> {
         Ok(AngularRateOutput {
-            x: self.get_angular_rate_helper(GX_HIGH, GX_LOW)? as f32 * self.gyroscope_scale,
-            y: self.get_angular_rate_helper(GY_HIGH, GY_LOW)? as f32 * self.gyroscope_scale,
-            z: self.get_angular_rate_helper(GZ_HIGH, GZ_LOW)? as f32 * self.gyroscope_scale,
+            x: self.get_angular_rate_helper(GX_HIGH, GX_LOW)? as f32 / self.gyroscope_scale,
+            y: self.get_angular_rate_helper(GY_HIGH, GY_LOW)? as f32 / self.gyroscope_scale,
+            z: self.get_angular_rate_helper(GZ_HIGH, GZ_LOW)? as f32 / self.gyroscope_scale,
+        })
+    }
+
+    /// Get COD Angular Rate Output (dps)
+    ///
+    /// # Errors
+    ///
+    /// This function can return an error if there is an issue during the communication process.
+    ///
+    /// Possible errors include:
+    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    #[allow(clippy::cast_lossless)]
+    pub fn get_cod_angular_rate(&mut self) -> Result<AngularRateOutput, Error<I::Error>> {
+        Ok(AngularRateOutput {
+            x: to_signed_u12_4_f32(self.get_angular_rate_helper(D_VX_HIGH, D_VX_LOW)?),
+            y: to_signed_u12_4_f32(self.get_angular_rate_helper(D_VY_HIGH, D_VY_LOW)?),
+            z: to_signed_u12_4_f32(self.get_angular_rate_helper(D_VZ_HIGH, D_VZ_LOW)?),
         })
     }
 
@@ -920,7 +940,7 @@ where
         let mut ctrl7 = self.get_ctrl7()?;
         ctrl7.set_accelerometer_enable(accelrometer);
         ctrl7.set_gyroscope_enable(gyroscope);
-        self.set_crtl7(ctrl7)
+        self.set_ctrl7(ctrl7)
     }
 
     /// Get enabled sensors
@@ -1028,7 +1048,11 @@ where
 
     /// Get FIFO Sample Count (MSB+LSB)
     ///
-    ///  # Errors
+    /// # Notes
+    ///
+    /// The sample count is 6xSensorNumberx2bytes.
+    ///
+    /// # Errors
     ///
     /// This function can return an error if there is an issue during the communication process.
     ///
@@ -1141,11 +1165,18 @@ where
         let sample_cnt = self.get_fifo_sample_cnt()?;
         let (gyro_en, acc_en) = self.get_sensors_enable()?;
 
+        let sample_per_iter = match (gyro_en, acc_en) {
+            (true, true) => 12,
+            _ => 6,
+        };
+
+        let iter_cnt = sample_cnt / sample_per_iter;
+
         // Send CTRL_CMD_REQ_FIFO (0x05) by CTRL9 command, to enable FIFO read mode.
         // Refer to CTRL_CMD_REQ_FIFO for details.
         self.send_command(Ctrl9Register::CtrlCmdReqFifo)?;
 
-        for i in 0..sample_cnt {
+        for i in 0..iter_cnt {
             match (gyro_en, acc_en) {
                 (true, true) => {
                     // this line will collect the acceleration output registers
@@ -1196,9 +1227,9 @@ where
         let (gyro_en, acc_en) = self.get_sensors_enable()?;
         self.set_sensors_enable(false, false)?;
 
-        let mut ctrl1 = self.get_crtl1()?;
+        let mut ctrl1 = self.get_ctrl1()?;
         ctrl1.set_fifo_int_sel(fifo_int_dir);
-        self.set_crtl1(ctrl1)?;
+        self.set_ctrl1(ctrl1)?;
 
         let mut fifo_ctrl = FIFOControlRegister(0);
         fifo_ctrl.set_fifo_mode(fifo_mode);
@@ -1214,6 +1245,140 @@ where
         Ok(())
     }
 
+    #[cfg(feature = "loglib")]
+    pub fn dump_register(&mut self) {
+        if let Ok(value) = self.get_ctrl1() {
+            log::warn!("{:?}", value);
+        }
+        if let Ok(value) = self.get_ctrl2() {
+            log::warn!("{:?}", value);
+        }
+        if let Ok(value) = self.get_ctrl3() {
+            log::warn!("{:?}", value);
+        }
+        if let Ok(value) = self.get_ctrl5() {
+            log::warn!("{:?}", value);
+        }
+        if let Ok(value) = self.get_ctrl7() {
+            log::warn!("{:?}", value);
+        }
+        if let Ok(value) = self.get_ctrl8() {
+            log::warn!("{:?}", value);
+        }
+    }
+
+    #[cfg(not(feature = "loglib"))]
+    #[allow(clippy::needless_pass_by_ref_mut)]
+    pub fn dump_register(&mut self) {}
+
+    /// Gyroscope Self-Test
+    ///
+    /// The gyroscope Self-Test (Check-Alive) is used to determine if the gyroscope is functional.
+    /// It is implemented by applying an electrostatic force to actuate each of the three X, Y, and Z axis of the gyroscope and
+    /// measures the mechanical response on the corresponding X, Y, and Z axis. If the equivalent magnitude of the gyroscope
+    /// output is greater than 300dps for each axis, the gyroscope can be considered as functional.
+    ///
+    /// The gyroscope Self-Test data is available to be read at output registers `dVX_L`, `dVX_H`, `dVY_L`, `dVY_H`, `dVZ_L` &
+    /// `dVZ_H`. The Host can initiate the Self-Test anytime with the following procedure.
+    ///
+    /// # Notes
+    ///
+    /// Self-Test process is about 400ms
+    ///
+    /// # Errors
+    ///
+    /// Possible errors include:
+    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    /// - Driver's error: This can occur if the `SensorDataAvailableAndLockRegister` host command doesn't acknowledge properly during the command process.
+    pub fn gyroscope_test(&mut self) -> Result<(), Error<I::Error>> {
+        let mut try_count = 0;
+
+        let mut ctrl1 = self.get_ctrl1()?;
+        let ctrl1_old = ctrl1;
+        ctrl1.set_int1_enable(false);
+        ctrl1.set_int2_enable(false);
+        self.set_ctrl1(ctrl1)?;
+
+        // The default values does not seem right at least a power-on-reset
+        // To prevent failing test, check if ast/gst is already true
+        let mut ctrl2 = self.get_ctrl2()?;
+        let mut ctrl3 = self.get_ctrl3()?;
+
+        if ctrl2.ast() {
+            ctrl2.set_ast(false);
+            self.set_ctrl2(ctrl2)?;
+        }
+
+        if ctrl3.gst() {
+            ctrl3.set_gst(false);
+            self.set_ctrl3(ctrl3)?;
+        }
+
+        // 1- Disable the sensors (CTRL7 = 0x00)
+        self.set_ctrl7(Ctrl7Register(0))?;
+        self.delay.delay_ms(10);
+
+        let mut ctrl3 = self.get_ctrl3()?;
+        ctrl3.set_gst(true);
+        self.set_ctrl3(ctrl3)?;
+
+        loop {
+            // 3- Wait for QMI8658A to drive INT2 to High, if INT2 is enabled, or STATUSINT.bit0 is set to 1
+            let value = self.get_sensor_data_available_and_lock()?;
+            if value.available() {
+                break;
+            }
+
+            if try_count >= 10 {
+                ctrl3.set_gst(false);
+                self.set_ctrl3(ctrl3)?;
+                return Err(Error::GyroscopeSelfTestFailed);
+            }
+
+            // Self-Test process is about 400ms
+            self.delay.delay_ms(100);
+            try_count += 1;
+        }
+
+        // 4- Set CTRL3.aST(bit7) to 0, to clear STATUSINT1.bit0 and/or INT2.
+        // Disable Self-Test
+        ctrl3.set_gst(false);
+        self.set_ctrl3(ctrl3)?;
+
+        try_count = 0;
+
+        // 5- Check for QMI8658A drives INT2 back to Low, or sets STATUSINT1.bit0 to 0.
+        loop {
+            let value = self.get_sensor_data_available_and_lock()?;
+            if !value.available() {
+                break;
+            }
+            if try_count >= 8 {
+                self.set_ctrl1(ctrl1_old)?;
+                return Err(Error::GyroscopeSelfTestFailed);
+            }
+
+            // Self-Test process is about 400ms
+            self.delay.delay_ms(100);
+            try_count += 1;
+        }
+
+        // Angular rate (dps) from CoD
+        let cod = self.get_cod_angular_rate()?;
+
+        // Revert changes
+        self.set_ctrl1(ctrl1_old)?;
+
+        // If the absolute results of all three axes are higher than 300dps,
+        // the gyroscope can be considered functional. Otherwise,
+        // the gyroscope cannot be considered functional.
+        if abs_f32(cod.x) > 300. && abs_f32(cod.y) > 300. && abs_f32(cod.z) > 300. {
+            Ok(())
+        } else {
+            Err(Error::GyroscopeSelfTestFailed)
+        }
+    }
+
     /// Send Command
     ///
     /// # Errors
@@ -1226,7 +1391,7 @@ where
     pub fn send_command(&mut self, value: Ctrl9Register) -> Result<(), Error<I::Error>> {
         let mut try_count = 0;
 
-        self.set_crtl9(value)?;
+        self.set_ctrl9(value)?;
 
         loop {
             let value = self.get_sensor_data_available_and_lock()?;
@@ -1240,7 +1405,7 @@ where
             try_count += 1;
         }
 
-        self.set_crtl9(Ctrl9Register::CtrlCmdAck)?;
+        self.set_ctrl9(Ctrl9Register::CtrlCmdAck)?;
 
         loop {
             let value = self.get_sensor_data_available_and_lock()?;
