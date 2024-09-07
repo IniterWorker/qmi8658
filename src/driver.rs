@@ -986,9 +986,9 @@ where
         let (gyro_en, acc_en) = self.get_sensors_enable()?;
         self.set_sensors_enable(false, false)?;
         let mut calibration = CalibrationRegisters::default();
-        calibration.cal1.0 = unsafe { core::mem::transmute(x) };
-        calibration.cal2.0 = unsafe { core::mem::transmute(y) };
-        calibration.cal3.0 = unsafe { core::mem::transmute(z) };
+        calibration.cal1.0 = unsafe { core::mem::transmute::<i16, u16>(x) };
+        calibration.cal2.0 = unsafe { core::mem::transmute::<i16, u16>(y) };
+        calibration.cal3.0 = unsafe { core::mem::transmute::<i16, u16>(z) };
         self.set_calibration_registers(calibration)?;
         self.send_command(Ctrl9Register::CtrlCmdAccelHostDeltaOffset)?;
         self.set_sensors_enable(gyro_en, acc_en)?;
@@ -1017,9 +1017,9 @@ where
         let (gyro_en, acc_en) = self.get_sensors_enable()?;
         self.set_sensors_enable(false, false)?;
         let mut calibration = CalibrationRegisters::default();
-        calibration.cal1.0 = unsafe { core::mem::transmute(x) };
-        calibration.cal2.0 = unsafe { core::mem::transmute(y) };
-        calibration.cal3.0 = unsafe { core::mem::transmute(z) };
+        calibration.cal1.0 = unsafe { core::mem::transmute::<i16, u16>(x) };
+        calibration.cal2.0 = unsafe { core::mem::transmute::<i16, u16>(y) };
+        calibration.cal3.0 = unsafe { core::mem::transmute::<i16, u16>(z) };
         self.set_calibration_registers(calibration)?;
         self.send_command(Ctrl9Register::CtrlCmdGyroHostDeltaOffset)?;
         self.set_sensors_enable(gyro_en, acc_en)?;

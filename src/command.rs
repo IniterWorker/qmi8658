@@ -1,3 +1,4 @@
+#![allow(clippy::doc_markdown)]
 #![allow(dead_code)]
 
 pub mod constants {
