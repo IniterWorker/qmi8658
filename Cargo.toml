@@ -28,6 +28,7 @@ targets = ["thumbv7m-none-eabi", "thumbv7em-none-eabihf"]
 embedded-hal = { version = "1.0.0" }
 bitfield = "0.15.0"
 log = { version = "0.4", default-features = false, optional = true }
+libm = { version = "0.2" }
 
 [features]
 default = []

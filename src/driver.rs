@@ -1,4 +1,5 @@
 #![allow(clippy::missing_const_for_fn)]
+#![allow(clippy::doc_markdown)]
 use embedded_hal::delay::DelayNs;
 use embedded_hal::i2c::{I2c, SevenBitAddress};
 
@@ -14,7 +15,7 @@ use crate::command::register::acceleration::{AccelerationOutput, AngularRateOutp
 use crate::command::register::cal::{Calibration, CalibrationRegisters};
 use crate::command::register::cod_status::CODStatusRegister;
 use crate::command::register::ctrl1::{Ctrl1Register, IntDirection};
-use crate::command::register::ctrl2::{AccelerometerFS, Ctrl2Register};
+use crate::command::register::ctrl2::{AccelerometerFS, AccelerometerODR, Ctrl2Register};
 use crate::command::register::ctrl3::{Ctrl3Register, GyroscopeFS};
 use crate::command::register::ctrl5::Ctrl5Register;
 use crate::command::register::ctrl7::Ctrl7Register;
@@ -32,7 +33,7 @@ use crate::command::register::status_int::{Ctrl9CmdDone, SensorDataAvailableAndL
 use crate::command::register::tap_status::TapStatusRegister;
 use crate::command::register::temp::Temperature;
 use crate::command::register::timestamp::SampleTimeStamp;
-use crate::fraction_helper::{abs_f32, to_signed_u12_4_f32};
+use crate::fraction_helper::{to_signed_u12_4_to_dps, to_signed_u5_11_g};
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy)]
@@ -65,14 +66,18 @@ pub enum Error<E> {
     Communication(E),
     /// On-Demande Calibration Failed
     CoDFailed,
-    /// Gyroscope Startup Failed
+    /// Gyroscope Failed
     GyroscopeFailed,
-    /// Host command Failed,
+    /// Host command Failed
     CmdFailed,
-    /// Host command Failed,
+    /// Host command Failed
     CmdAckFailed,
     /// Gyroscope Self-Test Failed
     GyroscopeSelfTestFailed,
+    /// Accelerometer Failed
+    AccelerometerFailed,
+    /// Accelerometer Self-Test Failed
+    AccelerometerSelfTestFailed,
 }
 
 impl<E> From<E> for Error<E> {
@@ -779,9 +784,26 @@ where
     #[allow(clippy::cast_lossless)]
     pub fn get_cod_angular_rate(&mut self) -> Result<AngularRateOutput, Error<I::Error>> {
         Ok(AngularRateOutput {
-            x: to_signed_u12_4_f32(self.get_angular_rate_helper(D_VX_HIGH, D_VX_LOW)?),
-            y: to_signed_u12_4_f32(self.get_angular_rate_helper(D_VY_HIGH, D_VY_LOW)?),
-            z: to_signed_u12_4_f32(self.get_angular_rate_helper(D_VZ_HIGH, D_VZ_LOW)?),
+            x: to_signed_u12_4_to_dps(self.get_angular_rate_helper(D_VX_HIGH, D_VX_LOW)?),
+            y: to_signed_u12_4_to_dps(self.get_angular_rate_helper(D_VY_HIGH, D_VY_LOW)?),
+            z: to_signed_u12_4_to_dps(self.get_angular_rate_helper(D_VZ_HIGH, D_VZ_LOW)?),
+        })
+    }
+
+    /// Get COD Acceleration Output (mg)
+    ///
+    /// # Errors
+    ///
+    /// This function can return an error if there is an issue during the communication process.
+    ///
+    /// Possible errors include:
+    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    #[allow(clippy::cast_lossless)]
+    pub fn get_cod_acceleration(&mut self) -> Result<AccelerationOutput, Error<I::Error>> {
+        Ok(AccelerationOutput {
+            x: to_signed_u5_11_g(self.get_acceleration_helper(D_VX_HIGH, D_VX_LOW)?),
+            y: to_signed_u5_11_g(self.get_acceleration_helper(D_VY_HIGH, D_VY_LOW)?),
+            z: to_signed_u5_11_g(self.get_acceleration_helper(D_VZ_HIGH, D_VZ_LOW)?),
         })
     }
 
@@ -1271,6 +1293,122 @@ where
     #[allow(clippy::needless_pass_by_ref_mut)]
     pub fn dump_register(&mut self) {}
 
+    /// Accelerometer Self-Test
+    ///
+    /// The accelerometer Self-Test (Check-Alive) is used to determine if the accelerometer is functional and working within
+    /// acceptable parameters.
+    /// It is implemented by applying an electrostatic force to actuate each of the three X, Y, and Z axis of the accelerometer.
+    /// If the accelerometer mechanical structure responds to this input stimulus by sensing at least 200 mg, then the
+    /// accelerometer can be considered functional.
+    ///
+    /// The accelerometer Self-Test data is available to be read at registers dVX_L, dVX_H, dVY_L, dVY_H, dVZ_L and
+    /// dVZ_H. The Host can initiate the Self-Test at any time with the following procedure.
+    ///
+    /// # Notes
+    ///
+    /// The typical time for Self-Test (from setting aST to 1, until the rising edge of INT2 if enabled,
+    /// or STATUSINT.bit0 is set to 1) costs about 25 ODRs:
+    /// * 25ms @ 1KHz ODR
+    ///
+    /// # Errors
+    ///
+    /// Possible errors include:
+    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    /// - Driver's error: This can occur if the `SensorDataAvailableAndLockRegister` host command doesn't acknowledge properly during the command process.
+    pub fn accelerometer_test(&mut self) -> Result<(), Error<I::Error>> {
+        let mut try_count = 0;
+
+        let mut ctrl1 = self.get_ctrl1()?;
+        let ctrl1_old = ctrl1;
+        ctrl1.set_int1_enable(false);
+        ctrl1.set_int2_enable(false);
+        self.set_ctrl1(ctrl1)?;
+
+        // The default values does not seem right at least a power-on-reset
+        // To prevent failing test, check if ast/gst is already true
+        let mut ctrl2 = self.get_ctrl2()?;
+        let mut ctrl3 = self.get_ctrl3()?;
+
+        if ctrl2.ast() {
+            ctrl2.set_ast(false);
+            self.set_ctrl2(ctrl2)?;
+        }
+
+        if ctrl3.gst() {
+            ctrl3.set_gst(false);
+            self.set_ctrl3(ctrl3)?;
+        }
+
+        let ctrl2_odr_old = ctrl2.aodr();
+
+        // 1- Disable the sensors (CTRL7 = 0x00)
+        self.set_ctrl7(Ctrl7Register(0))?;
+        self.delay.delay_ms(10);
+
+        let mut ctrl2 = self.get_ctrl2()?;
+        ctrl2.set_aodr(AccelerometerODR::NormalAODR3); // 1Khz
+        ctrl2.set_ast(true);
+        self.set_ctrl2(ctrl2)?;
+
+        loop {
+            // 3- Wait for QMI8658A to drive INT2 to High, if INT2 is enabled, or STATUSINT.bit0 is set to 1
+            let value = self.get_sensor_data_available_and_lock()?;
+            if value.available() {
+                break;
+            }
+
+            if try_count >= 10 {
+                ctrl2.set_ast(false);
+                ctrl2.set_aodr(ctrl2_odr_old);
+                self.set_ctrl2(ctrl2)?;
+                return Err(Error::AccelerometerFailed);
+            }
+
+            // Self-Test process is about 25ms
+            self.delay.delay_ms(25);
+            try_count += 1;
+        }
+
+        // 4- Set CTRL3.aST(bit7) to 0, to clear STATUSINT1.bit0 and/or INT2.
+        // Disable Self-Test
+        ctrl2.set_aodr(ctrl2_odr_old);
+        ctrl2.set_ast(false);
+        self.set_ctrl2(ctrl2)?;
+
+        try_count = 0;
+
+        // 5- Check for QMI8658A drives INT2 back to Low, or sets STATUSINT1.bit0 to 0.
+        loop {
+            let value = self.get_sensor_data_available_and_lock()?;
+            if !value.available() {
+                break;
+            }
+            if try_count >= 10 {
+                self.set_ctrl1(ctrl1_old)?;
+                return Err(Error::AccelerometerFailed);
+            }
+
+            // Self-Test process is about 400ms
+            self.delay.delay_ms(25);
+            try_count += 1;
+        }
+
+        // Angular rate (dps) from CoD
+        let cod = self.get_cod_acceleration()?;
+
+        // Revert changes
+        self.set_ctrl1(ctrl1_old)?;
+
+        // If the absolute results of all three axes are higher than 300dps,
+        // the gyroscope can be considered functional. Otherwise,
+        // the gyroscope cannot be considered functional.
+        if libm::fabsf(cod.x) > 0.2 && libm::fabsf(cod.y) > 0.2 && libm::fabsf(cod.z) > 0.2 {
+            Ok(())
+        } else {
+            Err(Error::AccelerometerSelfTestFailed)
+        }
+    }
+
     /// Gyroscope Self-Test
     ///
     /// The gyroscope Self-Test (Check-Alive) is used to determine if the gyroscope is functional.
@@ -1372,7 +1510,7 @@ where
         // If the absolute results of all three axes are higher than 300dps,
         // the gyroscope can be considered functional. Otherwise,
         // the gyroscope cannot be considered functional.
-        if abs_f32(cod.x) > 300. && abs_f32(cod.y) > 300. && abs_f32(cod.z) > 300. {
+        if libm::fabsf(cod.x) > 300. && libm::fabsf(cod.y) > 300. && libm::fabsf(cod.z) > 300. {
             Ok(())
         } else {
             Err(Error::GyroscopeSelfTestFailed)
