@@ -1,16 +1,19 @@
 #![allow(clippy::missing_const_for_fn)]
 #![allow(clippy::doc_markdown)]
+use bitfield::BitRange;
 use embedded_hal::delay::DelayNs;
 use embedded_hal::i2c::{I2c, SevenBitAddress};
 
 use crate::command::constants::{
     AX_HIGH, AX_LOW, AY_HIGH, AZ_HIGH, AZ_LOW, CAL1_HIGH, CAL1_LOW, CAL2_HIGH, CAL2_LOW, CAL3_HIGH,
-    CAL3_LOW, CAL4_HIGH, CAL4_LOW, COD_STATUS, CTRL1, CTRL2, CTRL3, CTRL5, CTRL7, CTRL8, CTRL9,
-    D_VX_HIGH, D_VX_LOW, D_VY_HIGH, D_VY_LOW, D_VZ_HIGH, D_VZ_LOW, FIFO_CTRL, FIFO_DATA,
-    FIFO_SMPL_CNT, FIFO_STATUS, FIFO_WTM_TH, GX_HIGH, GX_LOW, GY_HIGH, GY_LOW, GZ_HIGH, GZ_LOW,
-    RESET, REVISION_ID, STATUS0, STATUS1, STATUSINT, STEP_CNT_HIGH, STEP_CNT_LOW, STEP_CNT_MID,
-    TAP_STATUS, TEMP_HIGH, TEMP_LOW, TIMESTAMP_HIGH, TIMESTAMP_LOW, TIMESTAMP_MID, WHO_AM_I,
+    CAL3_LOW, CAL4_HIGH, CAL4_LOW, CMD_PARAM_FRIST, CMD_PARAM_SECOND, COD_STATUS, CTRL1, CTRL2,
+    CTRL3, CTRL5, CTRL7, CTRL8, CTRL9, D_VX_HIGH, D_VX_LOW, D_VY_HIGH, D_VY_LOW, D_VZ_HIGH,
+    D_VZ_LOW, FIFO_CTRL, FIFO_DATA, FIFO_SMPL_CNT, FIFO_STATUS, FIFO_WTM_TH, GX_HIGH, GX_LOW,
+    GY_HIGH, GY_LOW, GZ_HIGH, GZ_LOW, RESET, REVISION_ID, STATUS0, STATUS1, STATUSINT,
+    STEP_CNT_HIGH, STEP_CNT_LOW, STEP_CNT_MID, TAP_STATUS, TEMP_HIGH, TEMP_LOW, TIMESTAMP_HIGH,
+    TIMESTAMP_LOW, TIMESTAMP_MID, WHO_AM_I,
 };
+use crate::command::parameters::pedometer::PedometerParameters;
 use crate::command::register::acceleration::{AccelerationOutput, AngularRateOutput};
 use crate::command::register::cal::{Calibration, CalibrationRegisters};
 use crate::command::register::cod_status::CODStatusRegister;
@@ -33,7 +36,9 @@ use crate::command::register::status_int::{Ctrl9CmdDone, SensorDataAvailableAndL
 use crate::command::register::tap_status::TapStatusRegister;
 use crate::command::register::temp::Temperature;
 use crate::command::register::timestamp::SampleTimeStamp;
-use crate::fraction_helper::{to_signed_u12_4_to_dps, to_signed_u5_11_g};
+use crate::fraction_helper::{
+    convert_f32_to_u16_10bit_fraction, to_signed_u12_4_to_dps, to_signed_u5_11_g,
+};
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy)]
@@ -449,6 +454,168 @@ where
     pub fn reset(&mut self) -> Result<(), Error<I::Error>> {
         self.write_register(RESET, 0x4D)?;
         Ok(())
+    }
+
+    /// Configure Pedometer
+    ///
+    /// Easy configuration of the `Pedometer` engine. This will temporary disable the accelerometer and gyroscope,
+    /// as specified in the documentation.
+    ///
+    /// # Notes
+    ///
+    /// This function will write the parameters to the corresponding registers, according to Table 37 and Table 38 of the documentation.
+    /// Especially, write 0x01 to `CAL4_H` register for the first `CTRL9` command of parameters, while write 0x02 to `CAL4_H` for the second `CTRL9`
+    /// command of parameters. Then trigger the `CTRL9` command with 0x0D(CTRL_CMD_CONFIGURE_PEDOMETER).
+    /// Refer to Table 28 for details.
+    /// Table 38. Write Pedometer
+    ///
+    /// This function can return an error if there is an issue during the communication process.
+    ///
+    /// # Errors
+    ///
+    /// This function can return an error if there is an issue during the communication process.
+    ///
+    /// Possible errors include:
+    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    #[allow(clippy::cast_sign_loss)]
+    pub fn config_pedometer(
+        &mut self,
+        parameters: &PedometerParameters,
+    ) -> Result<(), Error<I::Error>> {
+        // NOTE: Configuration should be done when accelerometer and gyroscope are disabled(CTRL7.aEN = CTRL7.gEN =0).
+
+        let (gyro_en_old, acc_en_old) = self.get_sensors_enable()?;
+        self.set_sensors_enable(false, false)?;
+
+        // 1- First command
+
+        // ped_sample_cnt
+        self.write_register(
+            CAL1_LOW,
+            <u16 as BitRange<u8>>::bit_range(&(parameters.sample_cnt as u16), 7, 0),
+        )?;
+        self.write_register(
+            CAL1_HIGH,
+            <u16 as BitRange<u8>>::bit_range(&(parameters.sample_cnt as u16), 15, 8),
+        )?;
+
+        let fix_peak2peak = convert_f32_to_u16_10bit_fraction(parameters.fix_peak2peak);
+        // ped_fix_peak2peak
+        self.write_register(
+            CAL2_LOW,
+            <u16 as BitRange<u8>>::bit_range(&fix_peak2peak, 7, 0),
+        )?;
+        self.write_register(
+            CAL2_HIGH,
+            <u16 as BitRange<u8>>::bit_range(&fix_peak2peak, 15, 8),
+        )?;
+        // ped_fix_peak
+        self.write_register(
+            CAL3_LOW,
+            <u16 as BitRange<u8>>::bit_range(&(parameters.fix_peak as u16), 7, 0),
+        )?;
+        self.write_register(
+            CAL3_HIGH,
+            <u16 as BitRange<u8>>::bit_range(&(parameters.fix_peak as u16), 15, 8),
+        )?;
+
+        self.write_register(CAL4_HIGH, CMD_PARAM_FRIST)?;
+
+        self.send_command(Ctrl9Register::CtrlCmdConfigurePedometer)?;
+
+        // 2- Second command
+
+        // ped_time_up
+        self.write_register(
+            CAL1_LOW,
+            <u16 as BitRange<u8>>::bit_range(&(parameters.time_up as u16), 7, 0),
+        )?;
+        self.write_register(
+            CAL1_HIGH,
+            <u16 as BitRange<u8>>::bit_range(&(parameters.time_up as u16), 15, 8),
+        )?;
+
+        self.write_register(CAL2_LOW, parameters.time_low as u8)?;
+        self.write_register(CAL2_HIGH, parameters.cnt_entry as u8)?;
+        self.write_register(CAL3_LOW, parameters.fix_precision as u8)?;
+        self.write_register(CAL3_HIGH, parameters.sig_count as u8)?;
+
+        self.write_register(CAL4_HIGH, CMD_PARAM_SECOND)?;
+
+        self.send_command(Ctrl9Register::CtrlCmdConfigurePedometer)?;
+
+        self.set_sensors_enable(gyro_en_old, acc_en_old)?;
+
+        Ok(())
+    }
+
+    /// Set Enable Pedometer
+    ///
+    /// After successfully passed the parameters to QMI8658 Pedometer engine, host need to enable
+    /// Pedometer engine.
+    ///
+    /// # Pedometer Interrupt
+    ///
+    /// Once the detected steps (count from last pedometer event) reach the ped_sig_count defined by host, it will generate
+    /// the Pedometer interrupt once. For example, if ped_sig_count = 4, then every 4 valid steps detected, there is one
+    /// Pedometer interrupt (internal signal).
+    ///
+    /// # Errors
+    ///
+    /// This function can return an error if there is an issue during the communication process.
+    ///
+    /// Possible errors include:
+    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    pub fn set_pedometer_enable(&mut self, value: bool) -> Result<(), Error<I::Error>> {
+        let mut ctrl8 = self.get_ctrl8()?;
+        ctrl8.set_pedo_enable(value);
+        self.set_ctrl8(ctrl8)
+    }
+
+    /// Get Step Count Pedometer
+    ///
+    /// When the Pedometer is enabled, and the Pedometer event is detected (STATUS1.bit4 = 1), the step count is updated
+    /// to the Step Count registers of STEP_CNT_LOW, STEP_CNT_MIDL, STEP_CNT_HIGH, in 24-bits value. Note that the
+    /// step count is updated per the ped_sig_count definition. For example, if ped_sig_count = 4, the step count is be updated
+    /// every 4 steps. The 24-bits step count is cycling counted, will return to 0 after 0xFFFFFF.
+    ///
+    /// # Errors
+    ///
+    /// This function can return an error if there is an issue during the communication process.
+    ///
+    /// Possible errors include:
+    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    pub fn get_pedometer_step_count(&mut self) -> Result<u32, Error<I::Error>> {
+        let mut buffer = [0u8; 1];
+
+        self.interface
+            .write_read(self.addr.into(), &[STEP_CNT_LOW], &mut buffer)?;
+
+        let mut number = u32::from(buffer[0]);
+
+        self.interface
+            .write_read(self.addr.into(), &[STEP_CNT_MID], &mut buffer)?;
+
+        number |= u32::from(buffer[0]) << 8;
+
+        self.interface
+            .write_read(self.addr.into(), &[STEP_CNT_HIGH], &mut buffer)?;
+
+        number |= u32::from(buffer[0]) << 16;
+
+        Ok(number)
+    }
+
+    /// Reset Step Count Pedometer
+    ///
+    /// # Errors
+    ///
+    /// This function can return an error if there is an issue during the communication process.
+    ///
+    /// Possible errors include:
+    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
+    pub fn reset_pedometer_step_count(&mut self) -> Result<(), Error<I::Error>> {
+        self.send_command(Ctrl9Register::CtrlCmdResetPedometer)
     }
 
     /// Get FIFO Watermark Register Address

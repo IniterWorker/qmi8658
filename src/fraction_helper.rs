@@ -21,3 +21,14 @@ pub fn to_signed_u5_11_g(raw_value: i16) -> f32 {
     // Combine the integer and fractional parts
     f32::from(integer_part) + fractional_part
 }
+
+pub fn convert_f32_to_u16_10bit_fraction(value: f32) -> u16 {
+    // Scale the float value by 2^10 to account for the 10-bit fractional part
+    let scaled_value = libm::roundf(value * 1024.0);
+
+    // Ensure the value fits within the range of a 16-bit unsigned integer
+    #[allow(clippy::cast_sign_loss)]
+    let clamped_value = scaled_value.clamp(0.0, 65535.0) as u16;
+
+    clamped_value
+}
