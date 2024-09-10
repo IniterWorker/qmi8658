@@ -194,6 +194,10 @@ pub mod constants {
     /// Soft Reset Register Register (W)
     /// Default:  00000000
     pub const RESET: u8 = 0x60;
+    /// Parameters 1st command
+    pub const CMD_PARAM_FRIST: u8 = 0x01;
+    /// Parameters 2nd command
+    pub const CMD_PARAM_SECOND: u8 = 0x02;
 }
 pub mod register {
     pub mod ship_info {
@@ -1247,5 +1251,221 @@ pub mod register {
 
         /// Reset Register
         pub type ResetRegister = u8;
+    }
+}
+
+pub mod parameters {
+    pub mod pedometer {
+        //! The Pedometer Engine detects the steps and output the step count to the UI registers for host to read, as well as
+        //! generate the Pedometer interrupt.
+        //! The calculation of the Pedometer Detection is based on the accelerometer ODR defined by CTRL2.aODR, refer to
+        //! Table 22 for details.
+        //! The Pedometer can only work in Non-SyncSample mode, refer to 6.2 Non-SyncSample mode for details
+        //!
+
+        /// The `PedometerParameters` allows to easly configure
+        /// the `Pedometer`.
+        pub struct PedometerParameters {
+            /// Indicates the count of sample batch/window for calculation
+            /// Resolution: 1 sample
+            // Format: 2-bytes integer
+            // ped_sample_cnt
+            pub sample_cnt: i16,
+            /// Indicates the threshold of the valid peak-to-peak detection
+            /// Resolution: 1 mg
+            // Format: 2-bytes integer
+            // (1 / 2^10) g = 1 mg
+            //     ped_fix_peak2peak
+            pub fix_peak2peak: f32,
+            /// Indicates the threshold of the peak detection comparing to average
+            /// Resolution: 1 mg
+            // Format: 2-bytes integer
+            // (1 / 2^10) g = 1 mg
+            // ped_fix_peak
+            pub fix_peak: f32,
+            /// Indicates the maximum duration (timeout window) for a
+            /// step. Reset counting calculation if no peaks detected
+            /// within this duration.
+            /// E.g., 80 means 1.6s @ ODR = 50Hz
+            /// Resolution: 1 sample
+            // Format: 2-bytes integer
+            // ped_time_up
+            pub time_up: i16,
+            /// Indicates the minimum duration for a step. The peaks
+            /// detected within this duration \(quiet time\) is ignored.
+            /// E.g., 12 means 0.25s @ ODR = 50Hz
+            /// Resolution: 1 sample
+            // Format: 1-bytes integer
+            // ped_time_low
+            pub time_low: i8,
+            /// Indicates the minimum continuous steps to start the valid
+            /// step counting. If the continuously detected steps is lower
+            /// than this count and timeout, the steps will not be take
+            /// into account; if yes, the detected steps will all be taken
+            /// into account and counting is started to count every
+            /// following step before timeout. This is useful to screen out
+            /// the fake steps detected by non-step vibrations.
+            ///
+            /// The timeout duration is defined by `ped_time_up`.
+            ///
+            /// E.g., 10 means 10 steps entry count
+            /// Resolution: 1 step
+            // ped_cnt_entry
+            pub cnt_entry: i8,
+            /// 0 is recommended
+            /// Resolution: 1 sample
+            // Format: 1-bytes integer
+            // ped_fix_precision
+            pub fix_precision: i8,
+            /// The amount of steps when to update the pedometer
+            /// output registers.
+            //
+            /// E.g., ped_sig_count = 4, every 4 valid steps is detected,
+            /// update the registers once (added by 4).
+            /// Resolution: 1 sample
+            // Format: 1-bytes integer
+            // ped_sig_count
+            pub sig_count: i8,
+        }
+    }
+
+    pub mod tap {
+        //!The Tap engine detects the Single-Tap or Double-Tap, if enabled.
+        //!The calculation of the Tap Detection is based on the accelerometer ODR defined by CTRL2.aODR, refer to Table 22
+        //!for details.
+        //!The Tap detection can only work in Non-SyncSample mode, refer to for details 6.2 Non-SyncSample mode.
+        //!
+
+        /// Priority definition between the x, y, z axes of acceleration. O
+        #[allow(non_camel_case_types)]
+        pub enum Priority {
+            /// (X > Y> Z)
+            X_Y_Z = 0,
+            /// (X > Z > Y)
+            X_Z_Y = 1,
+            /// (Y > X > Z)
+            Y_X_Z = 2,
+            /// (Y > Z > X)
+            Y_Z_X = 3,
+            /// (Z > X > Y)
+            Z_X_Y = 4,
+            /// (Z > Y > X)
+            Z_Y_X = 5,
+        }
+
+        pub struct TapParameters {
+            /// Priority
+            ///
+            /// The axis that output the first peak of Linear Acceleration in a valid
+            /// Tap detection, will be consider as the Tap axis. However, there is
+            /// possibility that two or three of the axes shows same Linear
+            /// Acceleration at exactly same time when reach (or be higher than)
+            /// the PeakMagThr. In this case, the defined priority is used to judge
+            /// and select the axis as Tap axis.
+            // Format: 1-byte integer
+            pub priority: Priority,
+            /// PeakWindow
+            /// Defines the maximum duration (in sample) for a valid peak. In a
+            /// valid peak, the linear acceleration should reach or be higher than
+            /// the `s` and should return to quiet (no significant
+            /// movement) within `UDMThr`, at the end of PeakWindow.
+            /// E.g., 20 @500Hz ODR
+            // Format: 1-byte integer
+            // Resolution: er 1 sample
+            pub peak_window: u8,
+            /// TapWindow
+            ///
+            /// Defines the minimum quiet time before the second Tap happen.
+            /// After the first Tap is detected, there should be no significant
+            /// movement (defined by UDMThr) during the TapWindow. The valid
+            /// second tap should be detected after TapWindow and before
+            /// DTapWindow.
+            /// E.g., 20 @500Hz ODR
+            // Format: 2-bytes integer
+            // 1 sample
+            pub tap_window: u16,
+            /// DTapWindow
+            /// Defines the maximum time for a valid second Tap for Double Tap,
+            /// count start from the first peak of the valid first Tap.
+            /// E.g., 250 @500Hz ODR
+            // Format: 2-bytes integer
+            // 1 sample
+            pub d_tap_window: u16,
+            /// Alpha
+            ///
+            /// Defines the ratio for calculation the average of the acceleration.
+            /// The bigger of Alpha, the bigger weight of the latest data.
+            /// E.g., 0.0625
+            // Format: 1-byte unsigned, 7-bits fraction
+            // Resolution: 0.0078 (1/128)
+            pub alpha: f32,
+            /// Gamma
+            ///
+            /// Defines the ratio for calculating the average of the movement
+            /// magnitude. The bigger of Gamma, the bigger weight of the latest
+            /// data.
+            // Format: 1-byte unsigned, 7-bits fraction
+            // Resolution: 0.0078 (1/128)
+            pub gamma: f32,
+            /// PeakMagThr
+            ///
+            /// Threshold for peak detection
+            /// E.g, 0.8g
+            // Format: 2-bytes unsigned, 10-bits fraction
+            // Resolution: 0.001g2 (1/ 1024)
+            pub peak_mag_thr: f32,
+            /// UDMThr
+            ///
+            /// Undefined Motion threshold. This defines the threshold of the
+            /// Linear Acceleration for quiet status
+            /// E.g., 0.4g2
+            // Format: 2-bytes unsigned, 10-bits fraction
+            // Resolution: 0.001g2 (1/ 1024)
+            pub udm_thr: f32,
+        }
+    }
+
+    pub mod wom {
+        //! The purpose of the Wake on Motion (WoM) functionality is to allow a system to enter a low power sleep state while the
+        //! system is static and then to automatically awaken when moved. In this mode the system should use very little power,
+        //! yet still respond quickly to motion.
+        //! It is assumed that the system host processor is responsible for configuring the QMI8658A correctly to place it into Wake
+        //! on Motion mode, and then reconfigure the QMI8658A as necessary following a WoM interrupt.
+        //! Note that, Wake on Motion function works similar to Any-Motion detection but without sensor data output and can be
+        //! configure more flexibly on interrupt behavior. Besides, once QMI8658A is configured into Wake on Motion mode, there
+        //! is WoM interrupt to awaken the host if movement is detected.
+        //!
+
+        pub enum WoMThreshold {
+            Disabled,
+            Threshold(u8),
+        }
+
+        pub enum WoMInterruptInit {
+            /// Int2 with initial value 0
+            Int2_0 = 0b01,
+            /// Int2 with initial value 1
+            Int2_1 = 0b11,
+            /// Int1 with initial value 0
+            Int1_0 = 0b00,
+            /// Int1 with initial value 1
+            Int1_1 = 0b10,
+        }
+
+        pub struct WoMParameters {
+            // Format: 1-byte unsigned integer
+            /// Resolution 1mg
+            pub wom_threshold: WoMThreshold,
+            // Resolution 1
+            // Format: 2-bits unsigned integer
+            pub wom_interrupt: WoMInterruptInit,
+            /// Interrupt Blanking Time (in number of accelerometer samples),
+            /// the
+            /// number of consecutive samples that will be ignored after enabling the
+            /// WoM, to screen out unwanted fake detection
+            // Format: 6-bits unsigned integer
+            // Resolution: 1 sample
+            pub interrupt_blanking_time: u8,
+        }
     }
 }
