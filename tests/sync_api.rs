@@ -187,9 +187,9 @@ fn gyro_self_test_can_fail() {
         read(0x04, &[0x55]),
         read(0x08, &[0x03]),
         write(0x08, 0x00),
-        write(0x04, 0xD5), // CTRL3: gST on
+        write(0x04, 0x80), // CTRL3: gST on with reset FS/ODR (hardware-verified trigger)
         read(0x2D, &[0x01]),
-        write(0x04, 0x55), // gST off
+        write(0x04, 0x00), // gST off
         read(0x2D, &[0x00]),
     ]);
     let mut dvx = vec![0u8; 6];
@@ -256,5 +256,15 @@ fn ctrl9_timeout_when_done_never_asserts() {
         imu.init(Config::default()).unwrap_err(),
         Error::CommandTimeout
     ));
+    finish(imu);
+}
+
+#[test]
+fn device_id_uses_single_reads() {
+    // Works before `init` (address auto-increment not yet enabled).
+    let mut imu = driver(vec![read(0x00, &[0x05]), read(0x01, &[0x68])]);
+    let id = imu.device_id().unwrap();
+    assert_eq!(id.who_am_i, 0x05);
+    assert_eq!(id.revision, 0x68);
     finish(imu);
 }

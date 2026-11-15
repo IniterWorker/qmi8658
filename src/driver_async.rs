@@ -187,12 +187,9 @@ where
     /// # Errors
     /// Bus errors.
     pub async fn device_id(&mut self) -> Result<DeviceId, Error<IO::Error>> {
-        let mut buf = [0u8; 2];
-        self.io.read_block(registers::WHO_AM_I, &mut buf).await?;
-        Ok(DeviceId {
-            who_am_i: buf[0],
-            revision: buf[1],
-        })
+        let who_am_i = self.io.read_register(registers::WHO_AM_I).await?;
+        let revision = self.io.read_register(registers::REVISION_ID).await?;
+        Ok(DeviceId { who_am_i, revision })
     }
 
     /// Async mirror of [`crate::Qmi8658::unique_id`].
@@ -768,9 +765,11 @@ where
                 .write_register(registers::CTRL7, Ctrl7::default().to_bits())
                 .await?;
             self.delay.delay_ms(10).await;
+            // See the blocking driver: gyro self-test needs the
+            // reset-default full-scale/ODR fields (CTRL3 = 0x80).
             let test = Ctrl3 {
                 self_test: true,
-                ..Ctrl3::from_bits(saved3)
+                ..Ctrl3::default()
             };
             self.io
                 .write_register(registers::CTRL3, test.to_bits())

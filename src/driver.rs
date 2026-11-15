@@ -196,12 +196,11 @@ where
     /// # Errors
     /// Bus errors.
     pub fn device_id(&mut self) -> Result<DeviceId, Error<IO::Error>> {
-        let mut buf = [0u8; 2];
-        self.io.read_block(registers::WHO_AM_I, &mut buf)?;
-        Ok(DeviceId {
-            who_am_i: buf[0],
-            revision: buf[1],
-        })
+        // Single-register reads: address auto-increment is only set
+        // up by `init`, and probing identity beforehand must work.
+        let who_am_i = self.io.read_register(registers::WHO_AM_I)?;
+        let revision = self.io.read_register(registers::REVISION_ID)?;
+        Ok(DeviceId { who_am_i, revision })
     }
 
     /// Copy and read the firmware version and unique serial ID.
@@ -752,9 +751,13 @@ where
             self.io
                 .write_register(registers::CTRL7, Ctrl7::default().to_bits())?;
             self.delay.delay_ms(10);
+            // The gyro self-test only triggers with the reset-default
+            // full-scale/ODR fields (CTRL3 = 0x80), not with the
+            // running configuration; verified on hardware. The saved
+            // CTRL3 is restored afterwards.
             let test = Ctrl3 {
                 self_test: true,
-                ..Ctrl3::from_bits(saved3)
+                ..Ctrl3::default()
             };
             self.io.write_register(registers::CTRL3, test.to_bits())?;
             self.wait_statusint_avail(true, 1000)?;
