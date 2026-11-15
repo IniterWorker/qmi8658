@@ -1,1729 +1,1018 @@
-#![allow(clippy::missing_const_for_fn)]
-#![allow(clippy::doc_markdown)]
-use bitfield::BitRange;
-use embedded_hal::delay::DelayNs;
-use embedded_hal::i2c::{I2c, SevenBitAddress};
+//! Blocking QMI8658 driver over `embedded-hal` 1.0 traits.
 
-use crate::command::constants::{
-    AX_HIGH, AX_LOW, AY_HIGH, AZ_HIGH, AZ_LOW, CAL1_HIGH, CAL1_LOW, CAL2_HIGH, CAL2_LOW, CAL3_HIGH,
-    CAL3_LOW, CAL4_HIGH, CAL4_LOW, CMD_PARAM_FRIST, CMD_PARAM_SECOND, COD_STATUS, CTRL1, CTRL2,
-    CTRL3, CTRL5, CTRL7, CTRL8, CTRL9, D_VX_HIGH, D_VX_LOW, D_VY_HIGH, D_VY_LOW, D_VZ_HIGH,
-    D_VZ_LOW, FIFO_CTRL, FIFO_DATA, FIFO_SMPL_CNT, FIFO_STATUS, FIFO_WTM_TH, GX_HIGH, GX_LOW,
-    GY_HIGH, GY_LOW, GZ_HIGH, GZ_LOW, RESET, REVISION_ID, STATUS0, STATUS1, STATUSINT,
-    STEP_CNT_HIGH, STEP_CNT_LOW, STEP_CNT_MID, TAP_STATUS, TEMP_HIGH, TEMP_LOW, TIMESTAMP_HIGH,
-    TIMESTAMP_LOW, TIMESTAMP_MID, WHO_AM_I,
+use embedded_hal::{delay::DelayNs, i2c::I2c, spi::SpiDevice};
+
+use crate::config::{
+    Config, FifoConfig, InterruptConfig, MotionConfig, MotionEngines, PedometerConfig, TapConfig,
+    WomConfig,
 };
-use crate::command::parameters::pedometer::PedometerParameters;
-use crate::command::register::acceleration::{AccelerationOutput, AngularRateOutput};
-use crate::command::register::cal::{Calibration, CalibrationRegisters};
-use crate::command::register::cod_status::CODStatusRegister;
-use crate::command::register::ctrl1::{Ctrl1Register, IntDirection};
-use crate::command::register::ctrl2::{AccelerometerFS, AccelerometerODR, Ctrl2Register};
-use crate::command::register::ctrl3::{Ctrl3Register, GyroscopeFS};
-use crate::command::register::ctrl5::Ctrl5Register;
-use crate::command::register::ctrl7::Ctrl7Register;
-use crate::command::register::ctrl8::Ctrl8Register;
-use crate::command::register::ctrl9::Ctrl9Register;
-use crate::command::register::fifo_ctrl::{FIFOControlRegister, FIFOMode, FIFOSize};
-use crate::command::register::fifo_data::FIFODataRegister;
-use crate::command::register::fifo_sample_count::FIFOSampleCountRegister;
-use crate::command::register::fifo_status::FIFOStatusRegister;
-use crate::command::register::fifo_wtm_th::FIFOWTMRegister;
-use crate::command::register::ship_info::{DeviceID, RevisionID};
-use crate::command::register::status_0::OutputDataStatusRegister;
-use crate::command::register::status_1::MiscellaneousStatusRegister;
-use crate::command::register::status_int::{Ctrl9CmdDone, SensorDataAvailableAndLockRegister};
-use crate::command::register::tap_status::TapStatusRegister;
-use crate::command::register::temp::Temperature;
-use crate::command::register::timestamp::SampleTimeStamp;
-use crate::fraction_helper::{
-    convert_f32_to_u16_10bit_fraction, to_signed_u12_4_to_dps, to_signed_u5_11_g,
+use crate::data::{
+    ActivityStatus, DataStatus, DeviceId, FifoFrameFormat, FifoStatus, GyroGains, RawSample,
+    Sample, Scales, SelfTestReport, TapEvent, UniqueId, accel_offset_to_q4_12,
+    gyro_offset_to_q11_5, selftest_accel_delta_mg, selftest_gyro_delta_dps,
+};
+use crate::error::Error;
+use crate::interface::{DeviceAddress, I2cInterface, RegisterIo, SpiInterface};
+use crate::registers::{
+    self, AccelStandaloneOdr, CodStatus, Ctrl1, Ctrl2, Ctrl3, Ctrl7, Ctrl8, Ctrl9Command, FifoCtrl,
+    FifoMode, FifoStatusReg, SOFT_RESET_VALUE, StatusInt, WHO_AM_I_VALUE,
 };
 
-#[repr(u8)]
-#[derive(Debug, Clone, Copy)]
-pub enum DeviceAddress {
-    /// SA0 external pullup or floationg (intenal pullup)
-    Primary = 0x6A,
-    /// SA0 external pulldown
-    Secondary = 0x6B,
+/// Default Ctrl9 handshake budget. Calibration-on-demand passes a
+/// larger budget because its done bit asserts only after ≈1.5 s.
+const CTRL9_TIMEOUT_MS: u32 = 100;
+const COD_TIMEOUT_MS: u32 = 2000;
+
+/// Blocking QMI8658 driver.
+///
+/// `IO` is a register transport ([`I2cInterface`] or [`SpiInterface`],
+/// via [`new_i2c`](Self::new_i2c) / [`new_spi`](Self::new_spi)) and `D`
+/// a blocking delay provider.
+pub struct Qmi8658<IO, D> {
+    io: IO,
+    delay: D,
+    config: Config,
+    scales: Scales,
+    fifo_format: FifoFrameFormat,
+    fifo_mode: FifoMode,
 }
 
-impl From<DeviceAddress> for u8 {
-    fn from(value: DeviceAddress) -> Self {
-        match value {
-            DeviceAddress::Primary => 0x6A,
-            DeviceAddress::Secondary => 0x6B,
-        }
-    }
-}
-
-impl Default for DeviceAddress {
-    fn default() -> Self {
-        Self::Primary
-    }
-}
-
-/// `Qmi8658` driver's `Error`
-#[derive(Debug)]
-pub enum Error<E> {
-    /// Error related to the driver communication
-    Communication(E),
-    /// On-Demande Calibration Failed
-    CoDFailed,
-    /// Gyroscope Failed
-    GyroscopeFailed,
-    /// Host command Failed
-    CmdFailed,
-    /// Host command Failed
-    CmdAckFailed,
-    /// Gyroscope Self-Test Failed
-    GyroscopeSelfTestFailed,
-    /// Accelerometer Failed
-    AccelerometerFailed,
-    /// Accelerometer Self-Test Failed
-    AccelerometerSelfTestFailed,
-}
-
-impl<E> From<E> for Error<E> {
-    fn from(value: E) -> Self {
-        Self::Communication(value)
-    }
-}
-
-/// Qmi8658 Driver
-pub struct Qmi8658<I, D> {
-    /// I2C Interface
-    pub(crate) interface: I,
-    /// I2C Address
-    pub(crate) addr: DeviceAddress,
-    /// Delay
-    pub(crate) delay: D,
-    /// Gyroscope Scale
-    pub(crate) gyroscope_scale: f32,
-    /// Accelerometer Scale
-    pub(crate) accelerometer_scale: f32,
-}
-
-// #[derive(Clone, Debug)]
-// pub enum Error {
-//     /// I2C Error,
-//     I2CError(embedded_hal::i2c::Error)
-// }
-
-impl<I, D> Qmi8658<I, D>
+impl<I, D> Qmi8658<I2cInterface<I>, D>
 where
-    I: I2c<SevenBitAddress>,
+    I: I2c,
     D: DelayNs,
 {
-    /// Create a new Qmi8658 driver with default I2C address.
-    pub fn new(interface: I, delay: D) -> Self {
+    /// Create a driver over an I2C bus. Call [`init`](Self::init) next.
+    pub fn new_i2c(bus: I, address: DeviceAddress, delay: D) -> Self {
+        Self::with_io(I2cInterface::new(bus, address), delay)
+    }
+}
+
+impl<S, D> Qmi8658<SpiInterface<S>, D>
+where
+    S: SpiDevice,
+    D: DelayNs,
+{
+    /// Create a driver over an SPI device (4-wire, host Mode 0 or 3,
+    /// MSB first, up to 15 MHz). Call [`init`](Self::init) next.
+    pub fn new_spi(device: S, delay: D) -> Self {
+        Self::with_io(SpiInterface::new(device), delay)
+    }
+}
+
+impl<IO, D> Qmi8658<IO, D>
+where
+    IO: RegisterIo,
+    D: DelayNs,
+{
+    fn with_io(io: IO, delay: D) -> Self {
         Self {
-            interface,
-            addr: DeviceAddress::Primary,
+            io,
             delay,
-            gyroscope_scale: 0.,
-            accelerometer_scale: 0.,
+            config: Config::default(),
+            scales: Scales::default(),
+            fifo_format: FifoFrameFormat::AccelAndGyro,
+            fifo_mode: FifoMode::Bypass,
         }
     }
 
-    /// Create new Qmi8658 driver with secondary I2C address.
-    pub fn new_secondary_address(interface: I, delay: D) -> Self {
-        Self {
-            interface,
-            addr: DeviceAddress::Secondary,
-            delay,
-            gyroscope_scale: 0.,
-            accelerometer_scale: 0.,
+    /// Give back the transport and delay provider.
+    pub fn release(self) -> (IO, D) {
+        (self.io, self.delay)
+    }
+
+    /// The configuration most recently applied (or the default before
+    /// the first `init`).
+    #[must_use]
+    pub const fn config(&self) -> Config {
+        self.config
+    }
+
+    /// FIFO frame layout implied by the currently configured sensors.
+    #[must_use]
+    pub const fn fifo_format(&self) -> FifoFrameFormat {
+        self.fifo_format
+    }
+
+    /// Reset the device, verify its identity, set up the serial
+    /// interface (address auto-increment, little-endian output, both
+    /// interrupt pins driven), disable AHB clock gating so the
+    /// data-locking mechanism is reliable, and apply `config`.
+    ///
+    /// Wait at least 15 ms after power-up before calling this. After a
+    /// successful `init`, gyroscope data is valid once ≈150 ms plus
+    /// 3/ODR have elapsed; accelerometer data after ≈3 ms plus 3/ODR.
+    /// On failure the device may be left in its reset state; calling
+    /// `init` again is safe.
+    ///
+    /// # Errors
+    /// Bus errors, [`Error::InvalidDeviceId`] when WHO_AM_I is not
+    /// `0x05`, or [`Error::InvalidConfig`] for an invalid `config`.
+    pub fn init(&mut self, config: Config) -> Result<(), Error<IO::Error>> {
+        self.io.write_register(registers::RESET, SOFT_RESET_VALUE)?;
+        self.delay.delay_ms(15);
+        let who = self.io.read_register(registers::WHO_AM_I)?;
+        if who != WHO_AM_I_VALUE {
+            return Err(Error::InvalidDeviceId { got: who });
+        }
+        let interrupts = InterruptConfig::default();
+        let ctrl1 = Ctrl1 {
+            sim_3wire: false,
+            addr_ai: true,
+            big_endian: false,
+            int2_en: interrupts.int2_enable,
+            int1_en: interrupts.int1_enable,
+            fifo_int_on_int1: interrupts.fifo_interrupt_on_int1,
+            sensor_disable: false,
+        };
+        self.io.write_register(registers::CTRL1, ctrl1.to_bits())?;
+        self.set_ahb_clock_gating(false)?;
+        self.apply_config(config)?;
+        #[cfg(feature = "log")]
+        log::info!("qmi8658: init ok, config={config:?}");
+        Ok(())
+    }
+
+    /// Validate and apply a sensor configuration: sensors are stopped,
+    /// CTRL2/CTRL3/CTRL5 rewritten, then the configured sensors are
+    /// enabled in CTRL7. The data-ready signal is (re-)enabled on INT2;
+    /// use [`configure_interrupts`](Self::configure_interrupts) afterwards
+    /// for other routing. Gyroscope data is valid ≈150 ms + 3/ODR after
+    /// enabling; this function only waits out the 3 ms accelerometer
+    /// turn-on when the accelerometer runs alone.
+    ///
+    /// # Errors
+    /// [`Error::InvalidConfig`] (with no bus writes performed) when both
+    /// sensors are disabled, when a standalone/low-power accelerometer
+    /// ODR is combined with the gyroscope, or when SyncSample is
+    /// requested while the FIFO is not bypassed.
+    pub fn apply_config(&mut self, config: Config) -> Result<(), Error<IO::Error>> {
+        config
+            .validate(self.fifo_mode)
+            .map_err(Error::InvalidConfig)?;
+        self.io
+            .write_register(registers::CTRL7, Ctrl7::default().to_bits())?;
+        if let Some(accel) = &config.accel {
+            self.io
+                .write_register(registers::CTRL2, accel.ctrl2().to_bits())?;
+        }
+        if let Some(gyro) = &config.gyro {
+            self.io
+                .write_register(registers::CTRL3, gyro.ctrl3().to_bits())?;
+        }
+        self.io
+            .write_register(registers::CTRL5, config.ctrl5().to_bits())?;
+        self.io
+            .write_register(registers::CTRL7, config.ctrl7().to_bits())?;
+        self.config = config;
+        self.scales = config.scales();
+        self.fifo_format = config.fifo_format();
+        if config.accel.is_some() && config.gyro.is_none() {
+            self.delay.delay_ms(3);
+        }
+        Ok(())
+    }
+
+    /// Soft-reset the device and verify WHO_AM_I afterwards. All
+    /// device configuration is lost; follow with
+    /// `init(self.config())` to restore operation.
+    ///
+    /// # Errors
+    /// Bus errors or [`Error::InvalidDeviceId`].
+    pub fn soft_reset(&mut self) -> Result<(), Error<IO::Error>> {
+        self.io.write_register(registers::RESET, SOFT_RESET_VALUE)?;
+        self.delay.delay_ms(15);
+        let who = self.io.read_register(registers::WHO_AM_I)?;
+        if who != WHO_AM_I_VALUE {
+            return Err(Error::InvalidDeviceId { got: who });
+        }
+        self.fifo_mode = FifoMode::Bypass;
+        Ok(())
+    }
+
+    /// Read WHO_AM_I and REVISION_ID (revision reported verbatim;
+    /// it differs between silicon variants).
+    ///
+    /// # Errors
+    /// Bus errors.
+    pub fn device_id(&mut self) -> Result<DeviceId, Error<IO::Error>> {
+        let mut buf = [0u8; 2];
+        self.io.read_block(registers::WHO_AM_I, &mut buf)?;
+        Ok(DeviceId {
+            who_am_i: buf[0],
+            revision: buf[1],
+        })
+    }
+
+    /// Copy and read the firmware version and unique serial ID.
+    ///
+    /// # Errors
+    /// Bus errors or [`Error::CommandTimeout`].
+    pub fn unique_id(&mut self) -> Result<UniqueId, Error<IO::Error>> {
+        self.send_command(Ctrl9Command::CopyUsid, CTRL9_TIMEOUT_MS)?;
+        let mut firmware = [0u8; 3];
+        self.io.read_block(registers::DQW_L, &mut firmware)?;
+        let mut usid = [0u8; 6];
+        self.io.read_block(registers::DVX_L, &mut usid)?;
+        Ok(UniqueId { firmware, usid })
+    }
+
+    /// Read the new-data flags (STATUS0).
+    ///
+    /// # Errors
+    /// Bus errors.
+    pub fn data_ready(&mut self) -> Result<DataStatus, Error<IO::Error>> {
+        let s = registers::Status0::from_bits(self.io.read_register(registers::STATUS0)?);
+        Ok(DataStatus {
+            accel_ready: s.accel_ready,
+            gyro_ready: s.gyro_ready,
+        })
+    }
+
+    /// Read one complete raw sample set (timestamp, temperature,
+    /// accelerometer, gyroscope) in a single burst.
+    ///
+    /// In SyncSample mode STATUSINT is read first, which locks the
+    /// current sample set; the burst runs through the last gyro byte,
+    /// releasing the lock. In Non-SyncSample mode the burst is read
+    /// directly.
+    ///
+    /// # Errors
+    /// Bus errors.
+    pub fn read_raw(&mut self) -> Result<RawSample, Error<IO::Error>> {
+        if self.config.sync_sample {
+            let s = StatusInt::from_bits(self.io.read_register(registers::STATUSINT)?);
+            if s.avail && !s.locked {
+                // Wait out the worst-case data-lock delay (270 µs at
+                // the lowest low-power ODR).
+                self.delay.delay_us(300);
+            }
+        }
+        let mut buf = [0u8; 17];
+        self.io.read_block(registers::TIMESTAMP_L, &mut buf)?;
+        Ok(RawSample::from_block(&buf))
+    }
+
+    /// Read one sample set converted to g, dps, and °C using the
+    /// currently configured ranges.
+    ///
+    /// # Errors
+    /// Bus errors.
+    pub fn read_sample(&mut self) -> Result<Sample, Error<IO::Error>> {
+        let raw = self.read_raw()?;
+        Ok(self.scales.convert(&raw))
+    }
+
+    /// Read raw accelerometer counts `[x, y, z]`.
+    ///
+    /// # Errors
+    /// Bus errors.
+    pub fn read_accel_raw(&mut self) -> Result<[i16; 3], Error<IO::Error>> {
+        let mut buf = [0u8; 6];
+        self.io.read_block(registers::AX_L, &mut buf)?;
+        Ok(axes(&buf))
+    }
+
+    /// Read raw gyroscope counts `[x, y, z]`.
+    ///
+    /// # Errors
+    /// Bus errors.
+    pub fn read_gyro_raw(&mut self) -> Result<[i16; 3], Error<IO::Error>> {
+        let mut buf = [0u8; 6];
+        self.io.read_block(registers::GX_L, &mut buf)?;
+        Ok(axes(&buf))
+    }
+
+    /// Read the raw temperature value (signed 8.8 fixed point,
+    /// 1/256 °C per LSB; see `data::temperature_c`).
+    ///
+    /// # Errors
+    /// Bus errors.
+    pub fn read_temperature_raw(&mut self) -> Result<i16, Error<IO::Error>> {
+        let mut buf = [0u8; 2];
+        self.io.read_block(registers::TEMP_L, &mut buf)?;
+        Ok(i16::from_le_bytes(buf))
+    }
+
+    /// Read the 24-bit sample timestamp counter.
+    ///
+    /// # Errors
+    /// Bus errors.
+    pub fn read_timestamp(&mut self) -> Result<u32, Error<IO::Error>> {
+        let mut buf = [0u8; 3];
+        self.io.read_block(registers::TIMESTAMP_L, &mut buf)?;
+        Ok(u32::from(buf[0]) | (u32::from(buf[1]) << 8) | (u32::from(buf[2]) << 16))
+    }
+
+    /// Configure the FIFO and reset its contents. Sensor enable state
+    /// is not touched. When both sensors feed the FIFO they must run
+    /// at the same ODR (device requirement).
+    ///
+    /// # Errors
+    /// [`Error::InvalidConfig`] when SyncSample mode is on and `fifo`
+    /// does not bypass the FIFO; bus errors; [`Error::CommandTimeout`].
+    pub fn configure_fifo(&mut self, fifo: FifoConfig) -> Result<(), Error<IO::Error>> {
+        if self.config.sync_sample && fifo.mode != FifoMode::Bypass {
+            return Err(Error::InvalidConfig(
+                "FIFO cannot be used in SyncSample mode",
+            ));
+        }
+        self.io
+            .write_register(registers::FIFO_WTM_TH, fifo.watermark)?;
+        let ctrl = FifoCtrl {
+            read_mode: false,
+            size: fifo.size,
+            mode: fifo.mode,
+        };
+        self.io
+            .write_register(registers::FIFO_CTRL, ctrl.to_bits())?;
+        self.send_command(Ctrl9Command::ResetFifo, CTRL9_TIMEOUT_MS)?;
+        self.fifo_mode = fifo.mode;
+        Ok(())
+    }
+
+    /// Read the FIFO fill state.
+    ///
+    /// # Errors
+    /// Bus errors.
+    pub fn fifo_status(&mut self) -> Result<FifoStatus, Error<IO::Error>> {
+        let mut buf = [0u8; 2];
+        self.io.read_block(registers::FIFO_SMPL_CNT, &mut buf)?;
+        let reg = FifoStatusReg::from_bits(buf[1]);
+        let words = (u16::from(reg.sample_count_msb) << 8) | u16::from(buf[0]);
+        Ok(FifoStatus {
+            full: reg.full,
+            watermark_reached: reg.watermark,
+            overflow: reg.overflow,
+            not_empty: reg.not_empty,
+            bytes_available: 2 * words,
+        })
+    }
+
+    /// Clear all FIFO data, count, and flags.
+    ///
+    /// # Errors
+    /// Bus errors or [`Error::CommandTimeout`].
+    pub fn reset_fifo(&mut self) -> Result<(), Error<IO::Error>> {
+        self.send_command(Ctrl9Command::ResetFifo, CTRL9_TIMEOUT_MS)
+    }
+
+    /// Drain FIFO bytes into `buf`, returning how many were read
+    /// (always a whole number of frames; decode with
+    /// `data::FifoFrames`). FIFO filling is paused while draining and
+    /// resumes before this returns, including on the error path.
+    ///
+    /// # Errors
+    /// Bus errors or [`Error::CommandTimeout`].
+    pub fn read_fifo(&mut self, buf: &mut [u8]) -> Result<usize, Error<IO::Error>> {
+        let status = self.fifo_status()?;
+        let frame_len = self.fifo_format.frame_len();
+        let capacity = buf.len() / frame_len * frame_len;
+        let bytes = (status.bytes_available as usize).min(capacity);
+        if bytes == 0 {
+            return Ok(0);
+        }
+        self.send_command(Ctrl9Command::RequestFifo, CTRL9_TIMEOUT_MS)?;
+        let read_result = self.io.read_block(registers::FIFO_DATA, &mut buf[..bytes]);
+        let clear_result = self.modify_register(registers::FIFO_CTRL, |b| {
+            FifoCtrl {
+                read_mode: false,
+                ..FifoCtrl::from_bits(b)
+            }
+            .to_bits()
+        });
+        read_result?;
+        clear_result?;
+        Ok(bytes)
+    }
+
+    /// Send tap parameters and enable or disable the tap engine.
+    /// Sensors are stopped while the parameters are transferred
+    /// (device requirement) and restored afterwards.
+    ///
+    /// # Errors
+    /// Bus errors or [`Error::CommandTimeout`].
+    pub fn configure_tap(
+        &mut self,
+        config: &TapConfig,
+        enable: bool,
+    ) -> Result<(), Error<IO::Error>> {
+        self.with_sensors_off(|this| {
+            this.configure_engine(
+                config.encode_call1(),
+                config.encode_call2(),
+                Ctrl9Command::ConfigureTap,
+            )?;
+            this.modify_ctrl8(|c| Ctrl8 {
+                tap_en: enable,
+                ..c
+            })
+        })
+    }
+
+    /// Send motion parameters and select which engines run.
+    /// Sensors are stopped during the transfer and restored after.
+    ///
+    /// # Errors
+    /// Bus errors or [`Error::CommandTimeout`].
+    pub fn configure_motion(
+        &mut self,
+        config: &MotionConfig,
+        enable: MotionEngines,
+    ) -> Result<(), Error<IO::Error>> {
+        self.with_sensors_off(|this| {
+            this.configure_engine(
+                config.encode_call1(),
+                config.encode_call2(),
+                Ctrl9Command::ConfigureMotion,
+            )?;
+            this.modify_ctrl8(|c| Ctrl8 {
+                sig_motion_en: enable.significant_motion,
+                no_motion_en: enable.no_motion,
+                any_motion_en: enable.any_motion,
+                ..c
+            })
+        })
+    }
+
+    /// Send pedometer parameters and enable or disable the engine
+    /// (C variant). Sensors are stopped during the transfer and
+    /// restored after.
+    ///
+    /// # Errors
+    /// Bus errors, or [`Error::CommandTimeout`] on silicon without a
+    /// pedometer.
+    pub fn configure_pedometer(
+        &mut self,
+        config: &PedometerConfig,
+        enable: bool,
+    ) -> Result<(), Error<IO::Error>> {
+        self.with_sensors_off(|this| {
+            this.configure_engine(
+                config.encode_call1(),
+                config.encode_call2(),
+                Ctrl9Command::ConfigurePedometer,
+            )?;
+            this.modify_ctrl8(|c| Ctrl8 {
+                pedometer_en: enable,
+                ..c
+            })
+        })
+    }
+
+    /// Enter Wake-on-Motion mode (C variant): no sensor data is
+    /// produced; the configured interrupt pin toggles on motion.
+    /// Requires an accelerometer in the current configuration.
+    ///
+    /// # Errors
+    /// [`Error::InvalidConfig`] without an accelerometer configuration
+    /// or with a zero threshold; bus errors; [`Error::CommandTimeout`]
+    /// on silicon without WoM.
+    pub fn enable_wake_on_motion(&mut self, config: &WomConfig) -> Result<(), Error<IO::Error>> {
+        let Some(accel) = self.config.accel else {
+            return Err(Error::InvalidConfig(
+                "Wake-on-Motion requires an accelerometer configuration",
+            ));
+        };
+        if config.threshold_mg == 0 {
+            return Err(Error::InvalidConfig(
+                "Wake-on-Motion threshold must be non-zero",
+            ));
+        }
+        self.modify_ctrl7(|c| Ctrl7 {
+            accel_en: false,
+            ..c
+        })?;
+        self.io
+            .write_register(registers::CTRL2, accel.ctrl2().to_bits())?;
+        self.io.write_block(registers::CAL1_L, &config.encode())?;
+        self.send_command(Ctrl9Command::WriteWomSetting, CTRL9_TIMEOUT_MS)?;
+        self.modify_ctrl7(|c| Ctrl7 {
+            accel_en: true,
+            ..c
+        })
+    }
+
+    /// Leave Wake-on-Motion mode and restore the sensor enables from
+    /// the current configuration.
+    ///
+    /// # Errors
+    /// Bus errors or [`Error::CommandTimeout`].
+    pub fn disable_wake_on_motion(&mut self) -> Result<(), Error<IO::Error>> {
+        self.modify_ctrl7(|c| Ctrl7 {
+            accel_en: false,
+            gyro_en: false,
+            ..c
+        })?;
+        self.io.write_register(registers::CAL1_L, 0)?;
+        self.send_command(Ctrl9Command::WriteWomSetting, CTRL9_TIMEOUT_MS)?;
+        let (accel_en, gyro_en) = (self.config.accel.is_some(), self.config.gyro.is_some());
+        self.modify_ctrl7(|c| Ctrl7 {
+            gyro_en,
+            accel_en,
+            ..c
+        })
+    }
+
+    /// Read the activity engine event flags (STATUS1).
+    ///
+    /// # Errors
+    /// Bus errors.
+    pub fn activity_status(&mut self) -> Result<ActivityStatus, Error<IO::Error>> {
+        let s = registers::Status1::from_bits(self.io.read_register(registers::STATUS1)?);
+        Ok(ActivityStatus::from_status1(s))
+    }
+
+    /// Read and decode the current tap event, if one is flagged.
+    ///
+    /// # Errors
+    /// Bus errors.
+    pub fn tap_event(&mut self) -> Result<Option<TapEvent>, Error<IO::Error>> {
+        let s = registers::Status1::from_bits(self.io.read_register(registers::STATUS1)?);
+        if !s.tap {
+            return Ok(None);
+        }
+        let reg = registers::TapStatusReg::from_bits(self.io.read_register(registers::TAP_STATUS)?);
+        Ok(TapEvent::from_reg(reg))
+    }
+
+    /// Read the 24-bit pedometer step count (C variant).
+    ///
+    /// # Errors
+    /// Bus errors.
+    pub fn step_count(&mut self) -> Result<u32, Error<IO::Error>> {
+        let mut buf = [0u8; 3];
+        self.io.read_block(registers::STEP_CNT_L, &mut buf)?;
+        Ok(u32::from(buf[0]) | (u32::from(buf[1]) << 8) | (u32::from(buf[2]) << 16))
+    }
+
+    /// Reset the pedometer step count to zero (C variant).
+    ///
+    /// # Errors
+    /// Bus errors or [`Error::CommandTimeout`].
+    pub fn reset_step_count(&mut self) -> Result<(), Error<IO::Error>> {
+        self.send_command(Ctrl9Command::ResetPedometer, CTRL9_TIMEOUT_MS)
+    }
+
+    /// Apply interrupt pin enables and routing (CTRL1/CTRL7/CTRL8
+    /// read-modify-writes; unrelated bits preserved).
+    ///
+    /// # Errors
+    /// Bus errors.
+    pub fn configure_interrupts(
+        &mut self,
+        config: &InterruptConfig,
+    ) -> Result<(), Error<IO::Error>> {
+        let cfg = *config;
+        self.modify_register(registers::CTRL1, |b| {
+            Ctrl1 {
+                int1_en: cfg.int1_enable,
+                int2_en: cfg.int2_enable,
+                fifo_int_on_int1: cfg.fifo_interrupt_on_int1,
+                ..Ctrl1::from_bits(b)
+            }
+            .to_bits()
+        })?;
+        self.modify_ctrl8(|c| Ctrl8 {
+            activity_on_int1: cfg.activity_interrupt_on_int1,
+            ctrl9_handshake_statusint: !cfg.ctrl9_handshake_on_int1,
+            ..c
+        })?;
+        self.modify_ctrl7(|c| Ctrl7 {
+            drdy_dis: !cfg.data_ready_enable,
+            ..c
+        })
+    }
+
+    /// Apply host accelerometer delta offsets in g (signed Q4.12 on
+    /// the wire). Lost on reset.
+    ///
+    /// # Errors
+    /// [`Error::ValueOutOfRange`] outside `-8 <= g < 8`; bus errors;
+    /// [`Error::CommandTimeout`].
+    pub fn apply_accel_host_delta_offset(
+        &mut self,
+        offset_g: [f32; 3],
+    ) -> Result<(), Error<IO::Error>> {
+        let mut block = [0u8; 6];
+        for (i, g) in offset_g.into_iter().enumerate() {
+            let raw = accel_offset_to_q4_12(g).ok_or(Error::ValueOutOfRange)?;
+            block[i * 2..i * 2 + 2].copy_from_slice(&raw.to_le_bytes());
+        }
+        self.io.write_block(registers::CAL1_L, &block)?;
+        self.send_command(Ctrl9Command::AccelHostDeltaOffset, CTRL9_TIMEOUT_MS)
+    }
+
+    /// Apply host gyroscope delta offsets in dps (signed Q11.5 on
+    /// the wire). Lost on reset.
+    ///
+    /// # Errors
+    /// [`Error::ValueOutOfRange`] outside `-1024 <= dps < 1024`; bus
+    /// errors; [`Error::CommandTimeout`].
+    pub fn apply_gyro_host_delta_offset(
+        &mut self,
+        offset_dps: [f32; 3],
+    ) -> Result<(), Error<IO::Error>> {
+        let mut block = [0u8; 6];
+        for (i, dps) in offset_dps.into_iter().enumerate() {
+            let raw = gyro_offset_to_q11_5(dps).ok_or(Error::ValueOutOfRange)?;
+            block[i * 2..i * 2 + 2].copy_from_slice(&raw.to_le_bytes());
+        }
+        self.io.write_block(registers::CAL1_L, &block)?;
+        self.send_command(Ctrl9Command::GyroHostDeltaOffset, CTRL9_TIMEOUT_MS)
+    }
+
+    /// Run gyroscope calibration-on-demand. Takes ≈1.5 s; keep the
+    /// device still. Sensors are stopped for the calibration and
+    /// restored afterwards. On success the new gains are returned
+    /// (and already applied by the device).
+    ///
+    /// # Errors
+    /// [`Error::CalibrationFailed`] when COD_STATUS reports failure
+    /// (inspect [`cod_status`](Self::cod_status)); bus errors;
+    /// [`Error::CommandTimeout`].
+    pub fn calibrate_gyro_on_demand(&mut self) -> Result<GyroGains, Error<IO::Error>> {
+        let saved = Ctrl7::from_bits(self.io.read_register(registers::CTRL7)?);
+        self.io.write_register(
+            registers::CTRL7,
+            Ctrl7 {
+                accel_en: false,
+                gyro_en: false,
+                ..saved
+            }
+            .to_bits(),
+        )?;
+        let result = (|| {
+            self.send_command(Ctrl9Command::OnDemandCalibration, COD_TIMEOUT_MS)?;
+            if !self.cod_status()?.is_success() {
+                return Err(Error::CalibrationFailed);
+            }
+            let mut gains = GyroGains::default();
+            self.io.read_block(registers::DVX_L, &mut gains.0)?;
+            Ok(gains)
+        })();
+        let restore = self
+            .io
+            .write_register(registers::CTRL7, saved.to_bits())
+            .map_err(Error::Bus);
+        match (result, restore) {
+            (_, Err(e)) => Err(e),
+            (r, Ok(())) => r,
         }
     }
 
-    /// Give back the I2C interface
-    pub fn release(self) -> I {
-        self.interface
-    }
-
-    /// Write Register
+    /// Restore gyroscope gains saved from an earlier
+    /// [`calibrate_gyro_on_demand`](Self::calibrate_gyro_on_demand).
     ///
     /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-
-    fn write_register(&mut self, register_addr: u8, data: u8) -> Result<(), Error<I::Error>> {
-        // Create a buffer that includes the register address and the data
-        let buffer = [register_addr, data];
-
-        // Write the buffer to the device
-        self.interface.write(self.addr.into(), &buffer)?;
-        Ok(())
-    }
-
-    /// Get the device id.
-    ///
-    /// This function retrieves the device ID from the connected device.
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_device_id(&mut self) -> Result<DeviceID, Error<I::Error>> {
-        let mut buffer = [0u8; 1];
-        self.interface
-            .write_read(self.addr.into(), &[WHO_AM_I], &mut buffer)?;
-        let value = match buffer[0] {
-            0x05 => DeviceID::QST,
-            _ => DeviceID::Unknown,
-        };
-
-        Ok(value)
-    }
-
-    /// Get the device revision id
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_device_revision_id(&mut self) -> Result<RevisionID, Error<I::Error>> {
-        let mut buffer = [0u8; 1];
-        self.interface
-            .write_read(self.addr.into(), &[REVISION_ID], &mut buffer)?;
-
-        Ok(buffer[0])
-    }
-
-    /// Get Serial Interface and Sensor Enable.
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_ctrl1(&mut self) -> Result<Ctrl1Register, Error<I::Error>> {
-        let mut buffer = [0u8; 1];
-        self.interface
-            .write_read(self.addr.into(), &[CTRL1], &mut buffer)?;
-
-        Ok(Ctrl1Register(buffer[0]))
-    }
-
-    /// Set Serial Interface and Sensor Enable.
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn set_ctrl1(&mut self, value: Ctrl1Register) -> Result<(), Error<I::Error>> {
-        self.write_register(CTRL1, value.0)?;
-        Ok(())
-    }
-
-    /// Get Accelerometer Settings
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_ctrl2(&mut self) -> Result<Ctrl2Register, Error<I::Error>> {
-        let mut buffer = [0u8; 1];
-        self.interface
-            .write_read(self.addr.into(), &[CTRL2], &mut buffer)?;
-
-        Ok(Ctrl2Register(buffer[0]))
-    }
-
-    /// Set Accelerometer Settings
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn set_ctrl2(&mut self, value: Ctrl2Register) -> Result<(), Error<I::Error>> {
-        self.write_register(CTRL2, value.0)?;
-
-        // Calculate G/ADC(tick)
-        self.accelerometer_scale = match value.afs() {
-            AccelerometerFS::FS2G => 2.0 / 32768.0,
-            AccelerometerFS::FS4G => 4.0 / 32768.0,
-            AccelerometerFS::FS8G => 8.0 / 32768.0,
-            AccelerometerFS::FS16G => 16.0 / 32768.0,
-        };
-
-        Ok(())
-    }
-
-    /// Get Gyroscope Settings
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_ctrl3(&mut self) -> Result<Ctrl3Register, Error<I::Error>> {
-        let mut buffer = [0u8; 1];
-        self.interface
-            .write_read(self.addr.into(), &[CTRL3], &mut buffer)?;
-
-        Ok(Ctrl3Register(buffer[0]))
-    }
-
-    /// Set Gyroscope Settings
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn set_ctrl3(&mut self, value: Ctrl3Register) -> Result<(), Error<I::Error>> {
-        self.write_register(CTRL3, value.0)?;
-
-        // Calculate DPS/ADC(tick)
-        self.gyroscope_scale = match value.gfs() {
-            GyroscopeFS::DPS16 => 16.0 / 32768.0,
-            GyroscopeFS::DPS32 => 32.0 / 32768.0,
-            GyroscopeFS::DPS64 => 64.0 / 32768.0,
-            GyroscopeFS::DPS128 => 128.0 / 32768.0,
-            GyroscopeFS::DPS256 => 256.0 / 32768.0,
-            GyroscopeFS::DPS512 => 512.0 / 32768.0,
-            GyroscopeFS::DPS1024 => 1024.0 / 32768.0,
-            GyroscopeFS::DPS2048 => 2048.0 / 32768.0,
-        };
-
-        Ok(())
-    }
-
-    /// Get Sensor Data Processing Settings
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_ctrl5(&mut self) -> Result<Ctrl5Register, Error<I::Error>> {
-        let mut buffer = [0u8; 1];
-        self.interface
-            .write_read(self.addr.into(), &[CTRL5], &mut buffer)?;
-
-        Ok(Ctrl5Register(buffer[0]))
-    }
-
-    /// Set Sensor Data Processing Settings
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn set_ctrl5(&mut self, value: Ctrl5Register) -> Result<(), Error<I::Error>> {
-        self.write_register(CTRL5, value.0)?;
-        Ok(())
-    }
-
-    /// Get Enable Sensors and Configure Data Reads
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_ctrl7(&mut self) -> Result<Ctrl7Register, Error<I::Error>> {
-        let mut buffer = [0u8; 1];
-        self.interface
-            .write_read(self.addr.into(), &[CTRL7], &mut buffer)?;
-
-        Ok(Ctrl7Register(buffer[0]))
-    }
-
-    /// Set Enable Sensors and Configure Data Reads
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn set_ctrl7(&mut self, value: Ctrl7Register) -> Result<(), Error<I::Error>> {
-        self.write_register(CTRL7, value.0)?;
-        Ok(())
-    }
-
-    /// Get Motion Detection Control
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_ctrl8(&mut self) -> Result<Ctrl8Register, Error<I::Error>> {
-        let mut buffer = [0u8; 1];
-        self.interface
-            .write_read(self.addr.into(), &[CTRL8], &mut buffer)?;
-
-        Ok(Ctrl8Register(buffer[0]))
-    }
-
-    /// Set Motion Detection Control
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn set_ctrl8(&mut self, value: Ctrl8Register) -> Result<(), Error<I::Error>> {
-        self.write_register(CTRL8, value.0)?;
-        Ok(())
-    }
-
-    /// Get Host Commands. Register Address: 10 (0x0A)
-    /// Referred to: CTRL 9 Functionality (Executing Pre-defined Commands)
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    ///
-    pub fn get_ctrl9(&mut self) -> Result<Ctrl9Register, Error<I::Error>> {
-        let mut buffer = [0u8; 1];
-        self.interface
-            .write_read(self.addr.into(), &[CTRL9], &mut buffer)?;
-
-        Ok(match buffer[0] {
-            0x04 => Ctrl9Register::CtrlCmdRstFifo,
-            0x05 => Ctrl9Register::CtrlCmdReqFifo,
-            0x08 => Ctrl9Register::CtrlCmdWriteWomSetting,
-            0x09 => Ctrl9Register::CtrlCmdAccelHostDeltaOffset,
-            0x0A => Ctrl9Register::CtrlCmdGyroHostDeltaOffset,
-            0x0C => Ctrl9Register::CtrlCmdConfigureTap,
-            0x0D => Ctrl9Register::CtrlCmdConfigurePedometer,
-            0x0E => Ctrl9Register::CtrlCmdConfigureMotion,
-            0x0F => Ctrl9Register::CtrlCmdResetPedometer,
-            0x10 => Ctrl9Register::CtrlCmdCopyUsid,
-            0x11 => Ctrl9Register::CtrlCmdSetRpu,
-            0x12 => Ctrl9Register::CtrlCmdAhbClockGating,
-            0xA2 => Ctrl9Register::CtrlCmdOnDemandCalibration,
-            0xAA => Ctrl9Register::CtrlCmdApplyGyroGains,
-            // TODO: improve this error handling
-            _ => Ctrl9Register::CtrlCmdAck,
+    /// Bus errors or [`Error::CommandTimeout`].
+    pub fn apply_gyro_gains(&mut self, gains: &GyroGains) -> Result<(), Error<IO::Error>> {
+        let gains = *gains;
+        self.with_sensors_off(|this| {
+            this.io.write_block(registers::CAL1_L, &gains.0)?;
+            this.send_command(Ctrl9Command::ApplyGyroGains, CTRL9_TIMEOUT_MS)
         })
     }
 
-    /// Set Host Commands
+    /// Read the calibration-on-demand status register. Only valid
+    /// after a calibration-on-demand run.
     ///
     /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn set_ctrl9(&mut self, value: Ctrl9Register) -> Result<(), Error<I::Error>> {
-        self.write_register(CTRL9, value as u8)?;
-        Ok(())
+    /// Bus errors.
+    pub fn cod_status(&mut self) -> Result<CodStatus, Error<IO::Error>> {
+        Ok(CodStatus::from_bits(
+            self.io.read_register(registers::COD_STATUS)?,
+        ))
     }
 
-    /// Software Reset
+    /// Run the accelerometer self-test: each axis must respond with
+    /// more than 200 mg. Register state is restored afterwards,
+    /// including on failure. Report deltas are in milli-g.
     ///
     /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn reset(&mut self) -> Result<(), Error<I::Error>> {
-        self.write_register(RESET, 0x4D)?;
-        Ok(())
-    }
-
-    /// Configure Pedometer
-    ///
-    /// Easy configuration of the `Pedometer` engine. This will temporary disable the accelerometer and gyroscope,
-    /// as specified in the documentation.
-    ///
-    /// # Notes
-    ///
-    /// This function will write the parameters to the corresponding registers, according to Table 37 and Table 38 of the documentation.
-    /// Especially, write 0x01 to `CAL4_H` register for the first `CTRL9` command of parameters, while write 0x02 to `CAL4_H` for the second `CTRL9`
-    /// command of parameters. Then trigger the `CTRL9` command with 0x0D(CTRL_CMD_CONFIGURE_PEDOMETER).
-    /// Refer to Table 28 for details.
-    /// Table 38. Write Pedometer
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    #[allow(clippy::cast_sign_loss)]
-    pub fn config_pedometer(
-        &mut self,
-        parameters: &PedometerParameters,
-    ) -> Result<(), Error<I::Error>> {
-        // NOTE: Configuration should be done when accelerometer and gyroscope are disabled(CTRL7.aEN = CTRL7.gEN =0).
-
-        let (gyro_en_old, acc_en_old) = self.get_sensors_enable()?;
-        self.set_sensors_enable(false, false)?;
-
-        // 1- First command
-
-        // ped_sample_cnt
-        self.write_register(
-            CAL1_LOW,
-            <u16 as BitRange<u8>>::bit_range(&(parameters.sample_cnt as u16), 7, 0),
-        )?;
-        self.write_register(
-            CAL1_HIGH,
-            <u16 as BitRange<u8>>::bit_range(&(parameters.sample_cnt as u16), 15, 8),
-        )?;
-
-        let fix_peak2peak = convert_f32_to_u16_10bit_fraction(parameters.fix_peak2peak);
-        // ped_fix_peak2peak
-        self.write_register(
-            CAL2_LOW,
-            <u16 as BitRange<u8>>::bit_range(&fix_peak2peak, 7, 0),
-        )?;
-        self.write_register(
-            CAL2_HIGH,
-            <u16 as BitRange<u8>>::bit_range(&fix_peak2peak, 15, 8),
-        )?;
-        // ped_fix_peak
-        self.write_register(
-            CAL3_LOW,
-            <u16 as BitRange<u8>>::bit_range(&(parameters.fix_peak as u16), 7, 0),
-        )?;
-        self.write_register(
-            CAL3_HIGH,
-            <u16 as BitRange<u8>>::bit_range(&(parameters.fix_peak as u16), 15, 8),
-        )?;
-
-        self.write_register(CAL4_HIGH, CMD_PARAM_FRIST)?;
-
-        self.send_command(Ctrl9Register::CtrlCmdConfigurePedometer)?;
-
-        // 2- Second command
-
-        // ped_time_up
-        self.write_register(
-            CAL1_LOW,
-            <u16 as BitRange<u8>>::bit_range(&(parameters.time_up as u16), 7, 0),
-        )?;
-        self.write_register(
-            CAL1_HIGH,
-            <u16 as BitRange<u8>>::bit_range(&(parameters.time_up as u16), 15, 8),
-        )?;
-
-        self.write_register(CAL2_LOW, parameters.time_low as u8)?;
-        self.write_register(CAL2_HIGH, parameters.cnt_entry as u8)?;
-        self.write_register(CAL3_LOW, parameters.fix_precision as u8)?;
-        self.write_register(CAL3_HIGH, parameters.sig_count as u8)?;
-
-        self.write_register(CAL4_HIGH, CMD_PARAM_SECOND)?;
-
-        self.send_command(Ctrl9Register::CtrlCmdConfigurePedometer)?;
-
-        self.set_sensors_enable(gyro_en_old, acc_en_old)?;
-
-        Ok(())
-    }
-
-    /// Set Enable Pedometer
-    ///
-    /// After successfully passed the parameters to QMI8658 Pedometer engine, host need to enable
-    /// Pedometer engine.
-    ///
-    /// # Pedometer Interrupt
-    ///
-    /// Once the detected steps (count from last pedometer event) reach the ped_sig_count defined by host, it will generate
-    /// the Pedometer interrupt once. For example, if ped_sig_count = 4, then every 4 valid steps detected, there is one
-    /// Pedometer interrupt (internal signal).
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn set_pedometer_enable(&mut self, value: bool) -> Result<(), Error<I::Error>> {
-        let mut ctrl8 = self.get_ctrl8()?;
-        ctrl8.set_pedo_enable(value);
-        self.set_ctrl8(ctrl8)
-    }
-
-    /// Get Step Count Pedometer
-    ///
-    /// When the Pedometer is enabled, and the Pedometer event is detected (STATUS1.bit4 = 1), the step count is updated
-    /// to the Step Count registers of STEP_CNT_LOW, STEP_CNT_MIDL, STEP_CNT_HIGH, in 24-bits value. Note that the
-    /// step count is updated per the ped_sig_count definition. For example, if ped_sig_count = 4, the step count is be updated
-    /// every 4 steps. The 24-bits step count is cycling counted, will return to 0 after 0xFFFFFF.
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_pedometer_step_count(&mut self) -> Result<u32, Error<I::Error>> {
-        let mut buffer = [0u8; 1];
-
-        self.interface
-            .write_read(self.addr.into(), &[STEP_CNT_LOW], &mut buffer)?;
-
-        let mut number = u32::from(buffer[0]);
-
-        self.interface
-            .write_read(self.addr.into(), &[STEP_CNT_MID], &mut buffer)?;
-
-        number |= u32::from(buffer[0]) << 8;
-
-        self.interface
-            .write_read(self.addr.into(), &[STEP_CNT_HIGH], &mut buffer)?;
-
-        number |= u32::from(buffer[0]) << 16;
-
-        Ok(number)
-    }
-
-    /// Reset Step Count Pedometer
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn reset_pedometer_step_count(&mut self) -> Result<(), Error<I::Error>> {
-        self.send_command(Ctrl9Register::CtrlCmdResetPedometer)
-    }
-
-    /// Get FIFO Watermark Register Address
-    ///
-    /// Number of ODRs(Samples) needed to trigger FIFO watermark
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_fifo_wtm(&mut self) -> Result<FIFOWTMRegister, Error<I::Error>> {
-        let mut buffer = [0u8; 1];
-        self.interface
-            .write_read(self.addr.into(), &[FIFO_WTM_TH], &mut buffer)?;
-
-        Ok(buffer[0])
-    }
-
-    /// Set FIFO Watermark Register Address
-    ///
-    /// Number of ODRs(Samples) needed to trigger FIFO watermark
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn set_fifo_wtm(&mut self, value: FIFOWTMRegister) -> Result<(), Error<I::Error>> {
-        self.write_register(FIFO_WTM_TH, value)
-    }
-
-    /// Get FIFO Control Register Address
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_fifo_ctrl(&mut self) -> Result<FIFOControlRegister, Error<I::Error>> {
-        let mut buffer = [0u8; 1];
-        self.interface
-            .write_read(self.addr.into(), &[FIFO_CTRL], &mut buffer)?;
-
-        Ok(FIFOControlRegister(buffer[0]))
-    }
-
-    /// Set FIFO Control Register Address
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn set_fifo_ctrl(&mut self, value: FIFOControlRegister) -> Result<(), Error<I::Error>> {
-        self.write_register(FIFO_CTRL, value.0)
-    }
-
-    /// FIFO Sample Count Register Address
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    fn _get_fifo_sample_cnt(&mut self) -> Result<FIFOSampleCountRegister, Error<I::Error>> {
-        let mut buffer = [0u8; 1];
-        self.interface
-            .write_read(self.addr.into(), &[FIFO_SMPL_CNT], &mut buffer)?;
-
-        Ok(buffer[0])
-    }
-
-    /// FIFO Status
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_fifo_status(&mut self) -> Result<FIFOStatusRegister, Error<I::Error>> {
-        let mut buffer = [0u8; 1];
-        self.interface
-            .write_read(self.addr.into(), &[FIFO_STATUS], &mut buffer)?;
-
-        Ok(FIFOStatusRegister(buffer[0]))
-    }
-
-    /// FIFO Data
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_fifo_data(&mut self) -> Result<FIFODataRegister, Error<I::Error>> {
-        let mut buffer = [0u8; 1];
-        self.interface
-            .write_read(self.addr.into(), &[FIFO_DATA], &mut buffer)?;
-
-        Ok(FIFODataRegister(buffer[0]))
-    }
-
-    /// Sensor Data Available and Lock Register Address
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_sensor_data_available_and_lock(
-        &mut self,
-    ) -> Result<SensorDataAvailableAndLockRegister, Error<I::Error>> {
-        let mut buffer = [0u8; 1];
-        self.interface
-            .write_read(self.addr.into(), &[STATUSINT], &mut buffer)?;
-
-        Ok(SensorDataAvailableAndLockRegister(buffer[0]))
-    }
-
-    /// Output Data Status Register
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_output_data_status(&mut self) -> Result<OutputDataStatusRegister, Error<I::Error>> {
-        let mut buffer = [0u8; 1];
-        self.interface
-            .write_read(self.addr.into(), &[STATUS0], &mut buffer)?;
-
-        Ok(OutputDataStatusRegister(buffer[0]))
-    }
-
-    /// Miscellaneous Status
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_miscellaneous_status(
-        &mut self,
-    ) -> Result<MiscellaneousStatusRegister, Error<I::Error>> {
-        let mut buffer = [0u8; 1];
-        self.interface
-            .write_read(self.addr.into(), &[STATUS1], &mut buffer)?;
-
-        Ok(MiscellaneousStatusRegister(buffer[0]))
-    }
-
-    /// 3 Bytes Sample Time Stamp – Output Count.
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_sample_time_stamp_output_count(
-        &mut self,
-    ) -> Result<SampleTimeStamp, Error<I::Error>> {
-        let mut buffer = [0u8; 1];
-        let mut timestamp: SampleTimeStamp = 0;
-        self.interface
-            .write_read(self.addr.into(), &[TIMESTAMP_HIGH], &mut buffer)?;
-        timestamp |= SampleTimeStamp::from(buffer[0]) << 16;
-        self.interface
-            .write_read(self.addr.into(), &[TIMESTAMP_MID], &mut buffer)?;
-        timestamp |= SampleTimeStamp::from(buffer[0]) << 8;
-        self.interface
-            .write_read(self.addr.into(), &[TIMESTAMP_LOW], &mut buffer)?;
-        timestamp |= SampleTimeStamp::from(buffer[0]);
-
-        Ok(timestamp)
-    }
-
-    /// Temp Sensor Output
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_temperature(&mut self) -> Result<Temperature, Error<I::Error>> {
-        let mut buffer = [0u8; 1];
-        self.interface
-            .write_read(self.addr.into(), &[TEMP_HIGH], &mut buffer)?;
-        let mut temp = Temperature::from(buffer[0]);
-        self.interface
-            .write_read(self.addr.into(), &[TEMP_LOW], &mut buffer)?;
-        temp += Temperature::from(buffer[0]) / 265.;
-
-        Ok(temp)
-    }
-
-    /// Get Acceleration Output Helper
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    fn get_acceleration_helper(
-        &mut self,
-        high_addr: u8,
-        low_addr: u8,
-    ) -> Result<i16, Error<I::Error>> {
-        let mut buffer = [0u8; 1];
-        let mut tmp: i16 = 0;
-        self.interface
-            .write_read(self.addr.into(), &[high_addr], &mut buffer)?;
-        tmp |= i16::from(buffer[0]) << 8;
-        self.interface
-            .write_read(self.addr.into(), &[low_addr], &mut buffer)?;
-        tmp |= i16::from(buffer[0]);
-        Ok(tmp)
-    }
-
-    /// Get Acceleration Output Raw
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    #[allow(clippy::cast_lossless)]
-    pub fn get_acceleration_raw(&mut self) -> Result<AccelerationOutput, Error<I::Error>> {
-        Ok(AccelerationOutput {
-            x: self.get_acceleration_helper(AX_HIGH, AX_LOW)? as f32,
-            y: self.get_acceleration_helper(AY_HIGH, AX_LOW)? as f32,
-            z: self.get_acceleration_helper(AZ_HIGH, AZ_LOW)? as f32,
-        })
-    }
-
-    /// Get Acceleration Output
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    #[allow(clippy::cast_lossless)]
-    pub fn get_acceleration(&mut self) -> Result<AccelerationOutput, Error<I::Error>> {
-        Ok(AccelerationOutput {
-            x: self.get_acceleration_helper(AX_HIGH, AX_LOW)? as f32 * self.accelerometer_scale,
-            y: self.get_acceleration_helper(AY_HIGH, AX_LOW)? as f32 * self.accelerometer_scale,
-            z: self.get_acceleration_helper(AZ_HIGH, AZ_LOW)? as f32 * self.accelerometer_scale,
-        })
-    }
-
-    /// Get Angular Rate Output Helper
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    fn get_angular_rate_helper(
-        &mut self,
-        high_addr: u8,
-        low_addr: u8,
-    ) -> Result<i16, Error<I::Error>> {
-        let mut buffer = [0u8; 1];
-        let mut tmp: i16 = 0;
-        self.interface
-            .write_read(self.addr.into(), &[high_addr], &mut buffer)?;
-        tmp |= i16::from(buffer[0]) << 8;
-        self.interface
-            .write_read(self.addr.into(), &[low_addr], &mut buffer)?;
-        tmp |= i16::from(buffer[0]);
-        Ok(tmp)
-    }
-
-    /// Get Angular Rate Output Raw
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    #[allow(clippy::cast_lossless)]
-    pub fn get_angular_rate_raw(&mut self) -> Result<AngularRateOutput, Error<I::Error>> {
-        Ok(AngularRateOutput {
-            x: self.get_angular_rate_helper(GX_HIGH, GX_LOW)? as f32,
-            y: self.get_angular_rate_helper(GY_HIGH, GY_LOW)? as f32,
-            z: self.get_angular_rate_helper(GZ_HIGH, GZ_LOW)? as f32,
-        })
-    }
-
-    /// Get Angular Rate Output
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    #[allow(clippy::cast_lossless)]
-    pub fn get_angular_rate(&mut self) -> Result<AngularRateOutput, Error<I::Error>> {
-        Ok(AngularRateOutput {
-            x: self.get_angular_rate_helper(GX_HIGH, GX_LOW)? as f32 / self.gyroscope_scale,
-            y: self.get_angular_rate_helper(GY_HIGH, GY_LOW)? as f32 / self.gyroscope_scale,
-            z: self.get_angular_rate_helper(GZ_HIGH, GZ_LOW)? as f32 / self.gyroscope_scale,
-        })
-    }
-
-    /// Get COD Angular Rate Output (dps)
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    #[allow(clippy::cast_lossless)]
-    pub fn get_cod_angular_rate(&mut self) -> Result<AngularRateOutput, Error<I::Error>> {
-        Ok(AngularRateOutput {
-            x: to_signed_u12_4_to_dps(self.get_angular_rate_helper(D_VX_HIGH, D_VX_LOW)?),
-            y: to_signed_u12_4_to_dps(self.get_angular_rate_helper(D_VY_HIGH, D_VY_LOW)?),
-            z: to_signed_u12_4_to_dps(self.get_angular_rate_helper(D_VZ_HIGH, D_VZ_LOW)?),
-        })
-    }
-
-    /// Get COD Acceleration Output (mg)
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    #[allow(clippy::cast_lossless)]
-    pub fn get_cod_acceleration(&mut self) -> Result<AccelerationOutput, Error<I::Error>> {
-        Ok(AccelerationOutput {
-            x: to_signed_u5_11_g(self.get_acceleration_helper(D_VX_HIGH, D_VX_LOW)?),
-            y: to_signed_u5_11_g(self.get_acceleration_helper(D_VY_HIGH, D_VY_LOW)?),
-            z: to_signed_u5_11_g(self.get_acceleration_helper(D_VZ_HIGH, D_VZ_LOW)?),
-        })
-    }
-
-    /// Get Calibration
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    fn get_calibration_helper(
-        &mut self,
-        high_addr: u8,
-        low_addr: u8,
-    ) -> Result<Calibration, Error<I::Error>> {
-        let mut buffer = [0u8; 1];
-        let mut tmp: u16 = 0;
-        self.interface
-            .write_read(self.addr.into(), &[high_addr], &mut buffer)?;
-        tmp |= u16::from(buffer[0]) << 8;
-        self.interface
-            .write_read(self.addr.into(), &[low_addr], &mut buffer)?;
-        tmp |= u16::from(buffer[0]);
-        Ok(Calibration(tmp))
-    }
-
-    /// Set Calibration
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    fn set_calibration_helper(
-        &mut self,
-        high_addr: u8,
-        low_addr: u8,
-        cal: Calibration,
-    ) -> Result<(), Error<I::Error>> {
-        self.write_register(high_addr, cal.high())?;
-        self.write_register(low_addr, cal.low())?;
-        Ok(())
-    }
-
-    /// Get Calibrations Registers
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_calibration_registers(&mut self) -> Result<CalibrationRegisters, Error<I::Error>> {
-        Ok(CalibrationRegisters {
-            cal1: self.get_calibration_helper(CAL1_HIGH, CAL1_LOW)?,
-            cal2: self.get_calibration_helper(CAL2_HIGH, CAL2_LOW)?,
-            cal3: self.get_calibration_helper(CAL3_HIGH, CAL3_LOW)?,
-            cal4: self.get_calibration_helper(CAL4_HIGH, CAL4_LOW)?,
-        })
-    }
-
-    /// Set Calibrations Registers
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn set_calibration_registers(
-        &mut self,
-        registers: CalibrationRegisters,
-    ) -> Result<(), Error<I::Error>> {
-        self.set_calibration_helper(CAL1_HIGH, CAL1_LOW, registers.cal1)?;
-        self.set_calibration_helper(CAL2_HIGH, CAL2_LOW, registers.cal2)?;
-        self.set_calibration_helper(CAL3_HIGH, CAL3_LOW, registers.cal3)?;
-        self.set_calibration_helper(CAL4_HIGH, CAL4_LOW, registers.cal4)?;
-        Ok(())
-    }
-
-    /// Get Calibration-On-Demand (COD) Status Register
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_cod_status(&mut self) -> Result<CODStatusRegister, Error<I::Error>> {
-        let mut buffer = [0u8; 1];
-        self.interface
-            .write_read(self.addr.into(), &[COD_STATUS], &mut buffer)?;
-
-        Ok(CODStatusRegister(buffer[0]))
-    }
-
-    /// Get Activity Detection Output Registers
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_tap_status(&mut self) -> Result<TapStatusRegister, Error<I::Error>> {
-        let mut buffer: [u8; 1] = [0u8; 1];
-        self.interface
-            .write_read(self.addr.into(), &[TAP_STATUS], &mut buffer)?;
-
-        Ok(TapStatusRegister(buffer[0]))
-    }
-
-    /// 24-bit Step Count detected by Pedometer engine
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_step_cnt(&mut self) -> Result<SampleTimeStamp, Error<I::Error>> {
-        let mut buffer = [0u8; 1];
-        let mut timestamp: SampleTimeStamp = 0;
-        self.interface
-            .write_read(self.addr.into(), &[STEP_CNT_HIGH], &mut buffer)?;
-        timestamp |= SampleTimeStamp::from(buffer[0]) << 16;
-        self.interface
-            .write_read(self.addr.into(), &[STEP_CNT_MID], &mut buffer)?;
-        timestamp |= SampleTimeStamp::from(buffer[0]) << 8;
-        self.interface
-            .write_read(self.addr.into(), &[STEP_CNT_LOW], &mut buffer)?;
-        timestamp |= SampleTimeStamp::from(buffer[0]);
-
-        Ok(timestamp)
-    }
-
-    /// Set enable all sensors
-    ///
-    /// # Note:
-    ///
-    /// Bitmask apporach, this doesn't change any other bits
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn set_sensors_enable(
-        &mut self,
-        gyroscope: bool,
-        accelrometer: bool,
-    ) -> Result<(), Error<I::Error>> {
-        let mut ctrl7 = self.get_ctrl7()?;
-        ctrl7.set_accelerometer_enable(accelrometer);
-        ctrl7.set_gyroscope_enable(gyroscope);
-        self.set_ctrl7(ctrl7)
-    }
-
-    /// Get enabled sensors
-    ///
-    /// # Note:
-    ///
-    /// Bitmask apporach, this doesn't change any other bits
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    pub fn get_sensors_enable(&mut self) -> Result<(bool, bool), Error<I::Error>> {
-        let ctrl7 = self.get_ctrl7()?;
-        Ok((ctrl7.gyroscope_enable(), ctrl7.accelerometer_enable()))
-    }
-
-    /// On-Demande Calibration Gyroscope
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    /// - Driver's error: This can occur if the `Ctrl9Register` host command doesn't acknowledge properly during the command process.
-    pub fn cmd_on_demande_calibration_gyroscope(&mut self) -> Result<(), Error<I::Error>> {
-        let (gyro_en, acc_en) = self.get_sensors_enable()?;
-
-        self.set_sensors_enable(false, acc_en)?;
-        self.send_command(Ctrl9Register::CtrlCmdOnDemandCalibration)?;
-        self.delay.delay_ms(1500);
-        let cod_status = self.get_cod_status()?;
-        if cod_status.cod_failed() {
-            return Err(Error::CoDFailed);
-        }
-
-        self.set_sensors_enable(gyro_en, acc_en)?;
-        Ok(())
-    }
-
-    /// Change accelerometer offset
-    ///
-    /// # Note
-    ///
-    /// This offset change is lost when the sensor is power cycled, or the system is reset
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    /// - Driver's error: This can occur if the `Ctrl9Register` host command doesn't acknowledge properly during the command process.
-    pub fn cmd_accel_host_delta_offset(
-        &mut self,
-        x: i16,
-        y: i16,
-        z: i16,
-    ) -> Result<(), Error<I::Error>> {
-        let (gyro_en, acc_en) = self.get_sensors_enable()?;
-        self.set_sensors_enable(false, false)?;
-        let mut calibration = CalibrationRegisters::default();
-        calibration.cal1.0 = unsafe { core::mem::transmute::<i16, u16>(x) };
-        calibration.cal2.0 = unsafe { core::mem::transmute::<i16, u16>(y) };
-        calibration.cal3.0 = unsafe { core::mem::transmute::<i16, u16>(z) };
-        self.set_calibration_registers(calibration)?;
-        self.send_command(Ctrl9Register::CtrlCmdAccelHostDeltaOffset)?;
-        self.set_sensors_enable(gyro_en, acc_en)?;
-        Ok(())
-    }
-
-    /// Change gyrsocope offset
-    ///
-    /// # Note
-    ///
-    /// This offset change is lost when the sensor is power cycled, or the system is reset
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    /// - Driver's error: This can occur if the `Ctrl9Register` host command doesn't acknowledge properly during the command process.
-    pub fn cmd_gyro_host_delta_offset(
-        &mut self,
-        x: i16,
-        y: i16,
-        z: i16,
-    ) -> Result<(), Error<I::Error>> {
-        let (gyro_en, acc_en) = self.get_sensors_enable()?;
-        self.set_sensors_enable(false, false)?;
-        let mut calibration = CalibrationRegisters::default();
-        calibration.cal1.0 = unsafe { core::mem::transmute::<i16, u16>(x) };
-        calibration.cal2.0 = unsafe { core::mem::transmute::<i16, u16>(y) };
-        calibration.cal3.0 = unsafe { core::mem::transmute::<i16, u16>(z) };
-        self.set_calibration_registers(calibration)?;
-        self.send_command(Ctrl9Register::CtrlCmdGyroHostDeltaOffset)?;
-        self.set_sensors_enable(gyro_en, acc_en)?;
-        Ok(())
-    }
-
-    /// Get FIFO Sample Count (MSB+LSB)
-    ///
-    /// # Notes
-    ///
-    /// The sample count is 6xSensorNumberx2bytes.
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    #[allow(clippy::cast_lossless)]
-    pub fn get_fifo_sample_cnt(&mut self) -> Result<u16, Error<I::Error>> {
-        let fifo_smpl_cnt_lsb = self._get_fifo_sample_cnt()? as u16;
-        let fifo_smpl_cnt_msb = self.get_fifo_status()?.fifo_smpl_cnt_msb() as u16;
-        Ok(2 * ((fifo_smpl_cnt_msb * 256) + fifo_smpl_cnt_lsb))
-    }
-
-    /// Get Angular Rate Output Helper from FIFO
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    fn get_angular_rate_from_fifo_data_helper(&mut self) -> Result<i16, Error<I::Error>> {
-        let mut buffer = [0u8; 1];
-        let mut tmp: i16 = 0;
-        self.interface
-            .write_read(self.addr.into(), &[FIFO_DATA], &mut buffer)?;
-        tmp |= i16::from(buffer[0]);
-        self.interface
-            .write_read(self.addr.into(), &[FIFO_DATA], &mut buffer)?;
-        tmp |= i16::from(buffer[0]) << 8;
-
-        Ok(tmp)
-    }
-
-    /// Get Angular Rate Output
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    #[allow(clippy::cast_lossless)]
-    pub fn get_angular_rate_from_fifo_data(
-        &mut self,
-    ) -> Result<AngularRateOutput, Error<I::Error>> {
-        Ok(AngularRateOutput {
-            x: self.get_angular_rate_from_fifo_data_helper()? as f32 * self.gyroscope_scale,
-            y: self.get_angular_rate_from_fifo_data_helper()? as f32 * self.gyroscope_scale,
-            z: self.get_angular_rate_from_fifo_data_helper()? as f32 * self.gyroscope_scale,
-        })
-    }
-
-    /// Get Acceleration Output Helper from FIFO
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    fn get_acceleration_from_fifo_data_helper(&mut self) -> Result<i16, Error<I::Error>> {
-        let mut buffer = [0u8; 1];
-        let mut tmp: i16 = 0;
-        self.interface
-            .write_read(self.addr.into(), &[FIFO_DATA], &mut buffer)?;
-        tmp |= i16::from(buffer[0]);
-        self.interface
-            .write_read(self.addr.into(), &[FIFO_DATA], &mut buffer)?;
-        tmp |= i16::from(buffer[0]) << 8;
-
-        Ok(tmp)
-    }
-
-    /// Get Acceleration Output
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    #[allow(clippy::cast_lossless)]
-    pub fn get_acceleration_from_fifo_data(
-        &mut self,
-    ) -> Result<AccelerationOutput, Error<I::Error>> {
-        Ok(AccelerationOutput {
-            x: self.get_acceleration_from_fifo_data_helper()? as f32 * self.accelerometer_scale,
-            y: self.get_acceleration_from_fifo_data_helper()? as f32 * self.accelerometer_scale,
-            z: self.get_acceleration_from_fifo_data_helper()? as f32 * self.accelerometer_scale,
-        })
-    }
-
-    /// Read FIFO Data
-    ///
-    /// # Note
-    ///
-    /// Got FIFO watermark interrupt by INT pin or polling the `FIFO_STATUS` register (`FIFO_WTM` and/or `FIFO_FULL`)
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    /// - Driver's error: This can occur if the `Ctrl9Register` host command doesn't acknowledge properly during the command process.
-    pub fn read_fifo_data<F>(&mut self, func: F) -> Result<(), Error<I::Error>>
-    where
-        F: Fn(u16, Option<AccelerationOutput>, Option<AngularRateOutput>),
-    {
-        let sample_cnt = self.get_fifo_sample_cnt()?;
-        let (gyro_en, acc_en) = self.get_sensors_enable()?;
-
-        let sample_per_iter = match (gyro_en, acc_en) {
-            (true, true) => 12,
-            _ => 6,
-        };
-
-        let iter_cnt = sample_cnt / sample_per_iter;
-
-        // Send CTRL_CMD_REQ_FIFO (0x05) by CTRL9 command, to enable FIFO read mode.
-        // Refer to CTRL_CMD_REQ_FIFO for details.
-        self.send_command(Ctrl9Register::CtrlCmdReqFifo)?;
-
-        for i in 0..iter_cnt {
-            match (gyro_en, acc_en) {
-                (true, true) => {
-                    // this line will collect the acceleration output registers
-                    let acceleration = self.get_acceleration_from_fifo_data()?;
-                    // this line will collect the gyroscope output registers
-                    let angular_rate = self.get_angular_rate_from_fifo_data()?;
-                    func(i, Some(acceleration), Some(angular_rate));
+    /// [`Error::CommandTimeout`] if the device does not signal
+    /// completion; bus errors.
+    pub fn self_test_accel(&mut self) -> Result<SelfTestReport, Error<IO::Error>> {
+        let saved2 = self.io.read_register(registers::CTRL2)?;
+        let saved3 = self.io.read_register(registers::CTRL3)?;
+        let saved7 = self.io.read_register(registers::CTRL7)?;
+        let result = (|| {
+            self.io
+                .write_register(registers::CTRL7, Ctrl7::default().to_bits())?;
+            self.delay.delay_ms(10);
+            let test = Ctrl2 {
+                self_test: true,
+                odr_bits: AccelStandaloneOdr::Hz1000 as u8,
+                ..Ctrl2::from_bits(saved2)
+            };
+            self.io.write_register(registers::CTRL2, test.to_bits())?;
+            self.wait_statusint_avail(true, 500)?;
+            self.io.write_register(
+                registers::CTRL2,
+                Ctrl2 {
+                    self_test: false,
+                    ..test
                 }
-                (false, true) => {
-                    // this line will collect the acceleration output registers
-                    let acceleration = self.get_acceleration_from_fifo_data()?;
-                    func(i, Some(acceleration), None);
+                .to_bits(),
+            )?;
+            self.wait_statusint_avail(false, 500)?;
+            let raw = self.read_dvx()?;
+            let delta = [
+                selftest_accel_delta_mg(raw[0]),
+                selftest_accel_delta_mg(raw[1]),
+                selftest_accel_delta_mg(raw[2]),
+            ];
+            Ok(SelfTestReport {
+                passed: delta.iter().all(|d| d.abs() > 200.0),
+                delta,
+            })
+        })();
+        let restore = self.restore_ctrl2_3_7(saved2, saved3, saved7);
+        let report = match (result, restore) {
+            (_, Err(e)) => Err(e),
+            (r, Ok(())) => r,
+        }?;
+        #[cfg(feature = "log")]
+        log::info!("qmi8658: accel self-test {report:?}");
+        Ok(report)
+    }
+
+    /// Run the gyroscope self-test: each axis must respond with more
+    /// than 300 dps. Takes ≈400 ms. Register state is restored
+    /// afterwards, including on failure. Report deltas are in dps.
+    ///
+    /// # Errors
+    /// [`Error::CommandTimeout`] if the device does not signal
+    /// completion; bus errors.
+    pub fn self_test_gyro(&mut self) -> Result<SelfTestReport, Error<IO::Error>> {
+        let saved2 = self.io.read_register(registers::CTRL2)?;
+        let saved3 = self.io.read_register(registers::CTRL3)?;
+        let saved7 = self.io.read_register(registers::CTRL7)?;
+        let result = (|| {
+            self.io
+                .write_register(registers::CTRL7, Ctrl7::default().to_bits())?;
+            self.delay.delay_ms(10);
+            let test = Ctrl3 {
+                self_test: true,
+                ..Ctrl3::from_bits(saved3)
+            };
+            self.io.write_register(registers::CTRL3, test.to_bits())?;
+            self.wait_statusint_avail(true, 1000)?;
+            self.io.write_register(
+                registers::CTRL3,
+                Ctrl3 {
+                    self_test: false,
+                    ..test
                 }
-                (true, false) => {
-                    // this line will collect the gyroscope output registers
-                    let angular_rate = self.get_angular_rate_from_fifo_data()?;
-                    func(i, None, Some(angular_rate));
-                }
-                _ => {}
-            }
+                .to_bits(),
+            )?;
+            self.wait_statusint_avail(false, 1000)?;
+            let raw = self.read_dvx()?;
+            let delta = [
+                selftest_gyro_delta_dps(raw[0]),
+                selftest_gyro_delta_dps(raw[1]),
+                selftest_gyro_delta_dps(raw[2]),
+            ];
+            Ok(SelfTestReport {
+                passed: delta.iter().all(|d| d.abs() > 300.0),
+                delta,
+            })
+        })();
+        let restore = self.restore_ctrl2_3_7(saved2, saved3, saved7);
+        let report = match (result, restore) {
+            (_, Err(e)) => Err(e),
+            (r, Ok(())) => r,
+        }?;
+        #[cfg(feature = "log")]
+        log::info!("qmi8658: gyro self-test {report:?}");
+        Ok(report)
+    }
+
+    /// Enable or disable each sensor in CTRL7 and update the cached
+    /// configuration to match. Enabling a sensor that has no cached
+    /// configuration is rejected; use
+    /// [`apply_config`](Self::apply_config) instead.
+    ///
+    /// # Errors
+    /// [`Error::InvalidConfig`] as described; bus errors.
+    pub fn set_sensors_enabled(&mut self, accel: bool, gyro: bool) -> Result<(), Error<IO::Error>> {
+        if accel && self.config.accel.is_none() {
+            return Err(Error::InvalidConfig(
+                "no accelerometer configuration cached; use apply_config",
+            ));
         }
-
-        //  Disable the FIFO Read Mode by setting FIFO_CTRL.FIFO_rd_mode to 0.
-        // New data will be filled into FIFO afterwards.
-        let mut fifo_ctrl = self.get_fifo_ctrl()?;
-        fifo_ctrl.set_fifo_rd_mode(false);
-        self.set_fifo_ctrl(fifo_ctrl)?;
-
+        if gyro && self.config.gyro.is_none() {
+            return Err(Error::InvalidConfig(
+                "no gyroscope configuration cached; use apply_config",
+            ));
+        }
+        self.modify_ctrl7(|c| Ctrl7 {
+            accel_en: accel,
+            gyro_en: gyro,
+            ..c
+        })?;
+        if !accel {
+            self.config.accel = None;
+        }
+        if !gyro {
+            self.config.gyro = None;
+        }
+        self.fifo_format = self.config.fifo_format();
         Ok(())
     }
 
-    /// Configure the FIFO
+    /// Put the gyroscope into snooze mode (drive only, no data) or
+    /// back to full mode. Only effective while the gyro is enabled.
     ///
     /// # Errors
+    /// Bus errors.
+    pub fn set_gyro_snooze(&mut self, snooze: bool) -> Result<(), Error<IO::Error>> {
+        self.modify_ctrl7(|c| Ctrl7 {
+            gyro_snooze: snooze,
+            ..c
+        })
+    }
+
+    /// Switch the internal AHB clock gating. `init` disables gating
+    /// because the data-locking mechanism needs it off (on I2C at all
+    /// ODRs; on SPI for accel-only below 500 Hz). Re-enabling saves a
+    /// little power when locking is never used.
     ///
-    /// This function can return an error if there is an issue during the communication process.
+    /// # Errors
+    /// Bus errors or [`Error::CommandTimeout`].
+    pub fn set_ahb_clock_gating(&mut self, enabled: bool) -> Result<(), Error<IO::Error>> {
+        self.io
+            .write_register(registers::CAL1_L, u8::from(!enabled))?;
+        self.send_command(Ctrl9Command::AhbClockGating, CTRL9_TIMEOUT_MS)
+    }
+
+    /// Raw escape hatch: read one register.
     ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    /// - Driver's error: This can occur if the `Ctrl9Register` host command doesn't acknowledge properly during the command process.
-    pub fn config_fifo(
+    /// # Errors
+    /// Bus errors.
+    pub fn read_register(&mut self, reg: u8) -> Result<u8, Error<IO::Error>> {
+        Ok(self.io.read_register(reg)?)
+    }
+
+    /// Raw escape hatch: write one register.
+    ///
+    /// # Errors
+    /// Bus errors.
+    pub fn write_register(&mut self, reg: u8, value: u8) -> Result<(), Error<IO::Error>> {
+        Ok(self.io.write_register(reg, value)?)
+    }
+
+    /// Raw escape hatch: burst-read registers starting at `reg`.
+    ///
+    /// # Errors
+    /// Bus errors.
+    pub fn read_registers(&mut self, reg: u8, buf: &mut [u8]) -> Result<(), Error<IO::Error>> {
+        Ok(self.io.read_block(reg, buf)?)
+    }
+
+    /// Raw escape hatch: write registers starting at `reg`. Over SPI
+    /// this is one single-register transaction per byte.
+    ///
+    /// # Errors
+    /// Bus errors.
+    pub fn write_registers(&mut self, reg: u8, data: &[u8]) -> Result<(), Error<IO::Error>> {
+        Ok(self.io.write_block(reg, data)?)
+    }
+
+    /// Run the Ctrl9 handshake: write the command, poll STATUSINT
+    /// bit 7 at 1 ms intervals until done or `timeout_ms` elapses,
+    /// acknowledge, then poll (fresh budget) until the bit clears.
+    fn send_command(&mut self, cmd: Ctrl9Command, timeout_ms: u32) -> Result<(), Error<IO::Error>> {
+        self.io.write_register(registers::CTRL9, cmd as u8)?;
+        self.wait_cmd_done(true, timeout_ms, cmd)?;
+        self.io
+            .write_register(registers::CTRL9, Ctrl9Command::Ack as u8)?;
+        self.wait_cmd_done(false, timeout_ms, cmd)
+    }
+
+    fn wait_cmd_done(
         &mut self,
-        fifo_mode: FIFOMode,
-        fifo_size: FIFOSize,
-        fifo_int_dir: IntDirection,
-        threshold: FIFOWTMRegister,
-    ) -> Result<(), Error<I::Error>> {
-        let (gyro_en, acc_en) = self.get_sensors_enable()?;
-        self.set_sensors_enable(false, false)?;
-
-        let mut ctrl1 = self.get_ctrl1()?;
-        ctrl1.set_fifo_int_sel(fifo_int_dir);
-        self.set_ctrl1(ctrl1)?;
-
-        let mut fifo_ctrl = FIFOControlRegister(0);
-        fifo_ctrl.set_fifo_mode(fifo_mode);
-        fifo_ctrl.set_fifo_size(fifo_size);
-        self.set_fifo_ctrl(fifo_ctrl)?;
-
-        self.set_fifo_wtm(threshold)?;
-
-        self.send_command(Ctrl9Register::CtrlCmdRstFifo)?;
-
-        self.set_sensors_enable(gyro_en, acc_en)?;
-
-        Ok(())
-    }
-
-    #[cfg(feature = "loglib")]
-    pub fn dump_register(&mut self) {
-        if let Ok(value) = self.get_ctrl1() {
-            log::warn!("{:?}", value);
-        }
-        if let Ok(value) = self.get_ctrl2() {
-            log::warn!("{:?}", value);
-        }
-        if let Ok(value) = self.get_ctrl3() {
-            log::warn!("{:?}", value);
-        }
-        if let Ok(value) = self.get_ctrl5() {
-            log::warn!("{:?}", value);
-        }
-        if let Ok(value) = self.get_ctrl7() {
-            log::warn!("{:?}", value);
-        }
-        if let Ok(value) = self.get_ctrl8() {
-            log::warn!("{:?}", value);
-        }
-    }
-
-    #[cfg(not(feature = "loglib"))]
-    #[allow(clippy::needless_pass_by_ref_mut)]
-    pub fn dump_register(&mut self) {}
-
-    /// Accelerometer Self-Test
-    ///
-    /// The accelerometer Self-Test (Check-Alive) is used to determine if the accelerometer is functional and working within
-    /// acceptable parameters.
-    /// It is implemented by applying an electrostatic force to actuate each of the three X, Y, and Z axis of the accelerometer.
-    /// If the accelerometer mechanical structure responds to this input stimulus by sensing at least 200 mg, then the
-    /// accelerometer can be considered functional.
-    ///
-    /// The accelerometer Self-Test data is available to be read at registers dVX_L, dVX_H, dVY_L, dVY_H, dVZ_L and
-    /// dVZ_H. The Host can initiate the Self-Test at any time with the following procedure.
-    ///
-    /// # Notes
-    ///
-    /// The typical time for Self-Test (from setting aST to 1, until the rising edge of INT2 if enabled,
-    /// or STATUSINT.bit0 is set to 1) costs about 25 ODRs:
-    /// * 25ms @ 1KHz ODR
-    ///
-    /// # Errors
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    /// - Driver's error: This can occur if the `SensorDataAvailableAndLockRegister` host command doesn't acknowledge properly during the command process.
-    pub fn accelerometer_test(&mut self) -> Result<(), Error<I::Error>> {
-        let mut try_count = 0;
-
-        let mut ctrl1 = self.get_ctrl1()?;
-        let ctrl1_old = ctrl1;
-        ctrl1.set_int1_enable(false);
-        ctrl1.set_int2_enable(false);
-        self.set_ctrl1(ctrl1)?;
-
-        // The default values does not seem right at least a power-on-reset
-        // To prevent failing test, check if ast/gst is already true
-        let mut ctrl2 = self.get_ctrl2()?;
-        let mut ctrl3 = self.get_ctrl3()?;
-
-        if ctrl2.ast() {
-            ctrl2.set_ast(false);
-            self.set_ctrl2(ctrl2)?;
-        }
-
-        if ctrl3.gst() {
-            ctrl3.set_gst(false);
-            self.set_ctrl3(ctrl3)?;
-        }
-
-        let ctrl2_odr_old = ctrl2.aodr();
-
-        // 1- Disable the sensors (CTRL7 = 0x00)
-        self.set_ctrl7(Ctrl7Register(0))?;
-        self.delay.delay_ms(10);
-
-        let mut ctrl2 = self.get_ctrl2()?;
-        ctrl2.set_aodr(AccelerometerODR::NormalAODR3); // 1Khz
-        ctrl2.set_ast(true);
-        self.set_ctrl2(ctrl2)?;
-
+        done: bool,
+        timeout_ms: u32,
+        cmd: Ctrl9Command,
+    ) -> Result<(), Error<IO::Error>> {
+        let _ = cmd; // only used by the log call below when `log` is on
+        let mut elapsed = 0u32;
         loop {
-            // 3- Wait for QMI8658A to drive INT2 to High, if INT2 is enabled, or STATUSINT.bit0 is set to 1
-            let value = self.get_sensor_data_available_and_lock()?;
-            if value.available() {
-                break;
+            let s = StatusInt::from_bits(self.io.read_register(registers::STATUSINT)?);
+            if s.cmd_done == done {
+                return Ok(());
             }
-
-            if try_count >= 10 {
-                ctrl2.set_ast(false);
-                ctrl2.set_aodr(ctrl2_odr_old);
-                self.set_ctrl2(ctrl2)?;
-                return Err(Error::AccelerometerFailed);
-            }
-
-            // Self-Test process is about 25ms
-            self.delay.delay_ms(25);
-            try_count += 1;
-        }
-
-        // 4- Set CTRL3.aST(bit7) to 0, to clear STATUSINT1.bit0 and/or INT2.
-        // Disable Self-Test
-        ctrl2.set_aodr(ctrl2_odr_old);
-        ctrl2.set_ast(false);
-        self.set_ctrl2(ctrl2)?;
-
-        try_count = 0;
-
-        // 5- Check for QMI8658A drives INT2 back to Low, or sets STATUSINT1.bit0 to 0.
-        loop {
-            let value = self.get_sensor_data_available_and_lock()?;
-            if !value.available() {
-                break;
-            }
-            if try_count >= 10 {
-                self.set_ctrl1(ctrl1_old)?;
-                return Err(Error::AccelerometerFailed);
-            }
-
-            // Self-Test process is about 400ms
-            self.delay.delay_ms(25);
-            try_count += 1;
-        }
-
-        // Angular rate (dps) from CoD
-        let cod = self.get_cod_acceleration()?;
-
-        // Revert changes
-        self.set_ctrl1(ctrl1_old)?;
-
-        // If the absolute results of all three axes are higher than 300dps,
-        // the gyroscope can be considered functional. Otherwise,
-        // the gyroscope cannot be considered functional.
-        if libm::fabsf(cod.x) > 0.2 && libm::fabsf(cod.y) > 0.2 && libm::fabsf(cod.z) > 0.2 {
-            Ok(())
-        } else {
-            Err(Error::AccelerometerSelfTestFailed)
-        }
-    }
-
-    /// Gyroscope Self-Test
-    ///
-    /// The gyroscope Self-Test (Check-Alive) is used to determine if the gyroscope is functional.
-    /// It is implemented by applying an electrostatic force to actuate each of the three X, Y, and Z axis of the gyroscope and
-    /// measures the mechanical response on the corresponding X, Y, and Z axis. If the equivalent magnitude of the gyroscope
-    /// output is greater than 300dps for each axis, the gyroscope can be considered as functional.
-    ///
-    /// The gyroscope Self-Test data is available to be read at output registers `dVX_L`, `dVX_H`, `dVY_L`, `dVY_H`, `dVZ_L` &
-    /// `dVZ_H`. The Host can initiate the Self-Test anytime with the following procedure.
-    ///
-    /// # Notes
-    ///
-    /// Self-Test process is about 400ms
-    ///
-    /// # Errors
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    /// - Driver's error: This can occur if the `SensorDataAvailableAndLockRegister` host command doesn't acknowledge properly during the command process.
-    pub fn gyroscope_test(&mut self) -> Result<(), Error<I::Error>> {
-        let mut try_count = 0;
-
-        let mut ctrl1 = self.get_ctrl1()?;
-        let ctrl1_old = ctrl1;
-        ctrl1.set_int1_enable(false);
-        ctrl1.set_int2_enable(false);
-        self.set_ctrl1(ctrl1)?;
-
-        // The default values does not seem right at least a power-on-reset
-        // To prevent failing test, check if ast/gst is already true
-        let mut ctrl2 = self.get_ctrl2()?;
-        let mut ctrl3 = self.get_ctrl3()?;
-
-        if ctrl2.ast() {
-            ctrl2.set_ast(false);
-            self.set_ctrl2(ctrl2)?;
-        }
-
-        if ctrl3.gst() {
-            ctrl3.set_gst(false);
-            self.set_ctrl3(ctrl3)?;
-        }
-
-        // 1- Disable the sensors (CTRL7 = 0x00)
-        self.set_ctrl7(Ctrl7Register(0))?;
-        self.delay.delay_ms(10);
-
-        let mut ctrl3 = self.get_ctrl3()?;
-        ctrl3.set_gst(true);
-        self.set_ctrl3(ctrl3)?;
-
-        loop {
-            // 3- Wait for QMI8658A to drive INT2 to High, if INT2 is enabled, or STATUSINT.bit0 is set to 1
-            let value = self.get_sensor_data_available_and_lock()?;
-            if value.available() {
-                break;
-            }
-
-            if try_count >= 10 {
-                ctrl3.set_gst(false);
-                self.set_ctrl3(ctrl3)?;
-                return Err(Error::GyroscopeSelfTestFailed);
-            }
-
-            // Self-Test process is about 400ms
-            self.delay.delay_ms(100);
-            try_count += 1;
-        }
-
-        // 4- Set CTRL3.aST(bit7) to 0, to clear STATUSINT1.bit0 and/or INT2.
-        // Disable Self-Test
-        ctrl3.set_gst(false);
-        self.set_ctrl3(ctrl3)?;
-
-        try_count = 0;
-
-        // 5- Check for QMI8658A drives INT2 back to Low, or sets STATUSINT1.bit0 to 0.
-        loop {
-            let value = self.get_sensor_data_available_and_lock()?;
-            if !value.available() {
-                break;
-            }
-            if try_count >= 8 {
-                self.set_ctrl1(ctrl1_old)?;
-                return Err(Error::GyroscopeSelfTestFailed);
-            }
-
-            // Self-Test process is about 400ms
-            self.delay.delay_ms(100);
-            try_count += 1;
-        }
-
-        // Angular rate (dps) from CoD
-        let cod = self.get_cod_angular_rate()?;
-
-        // Revert changes
-        self.set_ctrl1(ctrl1_old)?;
-
-        // If the absolute results of all three axes are higher than 300dps,
-        // the gyroscope can be considered functional. Otherwise,
-        // the gyroscope cannot be considered functional.
-        if libm::fabsf(cod.x) > 300. && libm::fabsf(cod.y) > 300. && libm::fabsf(cod.z) > 300. {
-            Ok(())
-        } else {
-            Err(Error::GyroscopeSelfTestFailed)
-        }
-    }
-
-    /// Send Command
-    ///
-    /// # Errors
-    ///
-    /// This function can return an error if there is an issue during the communication process.
-    ///
-    /// Possible errors include:
-    /// - Communication error: This can occur if there is a problem communicating with the device over the interface.
-    /// - Driver's error: This can occur if the `Ctrl9Register` host command doesn't acknowledge properly during the command process.
-    pub fn send_command(&mut self, value: Ctrl9Register) -> Result<(), Error<I::Error>> {
-        let mut try_count = 0;
-
-        self.set_ctrl9(value)?;
-
-        loop {
-            let value = self.get_sensor_data_available_and_lock()?;
-            if value.ctrl9_cmd_done() == Ctrl9CmdDone::Done {
-                break;
-            }
-            if try_count >= 1000 {
-                return Err(Error::CmdFailed);
+            if elapsed >= timeout_ms {
+                #[cfg(feature = "log")]
+                log::warn!("qmi8658: Ctrl9 command {cmd:?} timed out after {timeout_ms} ms");
+                return Err(Error::CommandTimeout);
             }
             self.delay.delay_ms(1);
-            try_count += 1;
+            elapsed += 1;
         }
+    }
 
-        self.set_ctrl9(Ctrl9Register::CtrlCmdAck)?;
-
+    fn wait_statusint_avail(
+        &mut self,
+        avail: bool,
+        timeout_ms: u32,
+    ) -> Result<(), Error<IO::Error>> {
+        let mut elapsed = 0u32;
         loop {
-            let value = self.get_sensor_data_available_and_lock()?;
-            if value.ctrl9_cmd_done() == Ctrl9CmdDone::NotCompleted {
-                break;
+            let s = StatusInt::from_bits(self.io.read_register(registers::STATUSINT)?);
+            if s.avail == avail {
+                return Ok(());
             }
-            if try_count >= 1000 {
-                return Err(Error::CmdAckFailed);
+            if elapsed >= timeout_ms {
+                return Err(Error::CommandTimeout);
             }
-            self.delay.delay_ms(1);
-            try_count += 1;
+            self.delay.delay_ms(5);
+            elapsed += 5;
         }
+    }
 
+    fn modify_register(
+        &mut self,
+        reg: u8,
+        f: impl FnOnce(u8) -> u8,
+    ) -> Result<(), Error<IO::Error>> {
+        let current = self.io.read_register(reg)?;
+        self.io.write_register(reg, f(current))?;
         Ok(())
     }
+
+    fn modify_ctrl7(&mut self, f: impl FnOnce(Ctrl7) -> Ctrl7) -> Result<(), Error<IO::Error>> {
+        self.modify_register(registers::CTRL7, |b| f(Ctrl7::from_bits(b)).to_bits())
+    }
+
+    fn modify_ctrl8(&mut self, f: impl FnOnce(Ctrl8) -> Ctrl8) -> Result<(), Error<IO::Error>> {
+        self.modify_register(registers::CTRL8, |b| f(Ctrl8::from_bits(b)).to_bits())
+    }
+
+    /// Stop both sensors, run `f`, then restore the previous CTRL7.
+    /// A restore bus error is returned in preference to `f`'s result.
+    fn with_sensors_off<R>(
+        &mut self,
+        f: impl FnOnce(&mut Self) -> Result<R, Error<IO::Error>>,
+    ) -> Result<R, Error<IO::Error>> {
+        let saved = Ctrl7::from_bits(self.io.read_register(registers::CTRL7)?);
+        self.io.write_register(
+            registers::CTRL7,
+            Ctrl7 {
+                accel_en: false,
+                gyro_en: false,
+                ..saved
+            }
+            .to_bits(),
+        )?;
+        let result = f(self);
+        let restore = self
+            .io
+            .write_register(registers::CTRL7, saved.to_bits())
+            .map_err(Error::Bus);
+        match (result, restore) {
+            (_, Err(e)) => Err(e),
+            (r, Ok(())) => r,
+        }
+    }
+
+    /// Two-call Ctrl9 parameter transfer used by the activity engines.
+    fn configure_engine(
+        &mut self,
+        call1: [u8; 8],
+        call2: [u8; 8],
+        cmd: Ctrl9Command,
+    ) -> Result<(), Error<IO::Error>> {
+        self.io.write_block(registers::CAL1_L, &call1)?;
+        self.send_command(cmd, CTRL9_TIMEOUT_MS)?;
+        self.io.write_block(registers::CAL1_L, &call2)?;
+        self.send_command(cmd, CTRL9_TIMEOUT_MS)
+    }
+
+    fn read_dvx(&mut self) -> Result<[i16; 3], Error<IO::Error>> {
+        let mut buf = [0u8; 6];
+        self.io.read_block(registers::DVX_L, &mut buf)?;
+        Ok(axes(&buf))
+    }
+
+    fn restore_ctrl2_3_7(
+        &mut self,
+        ctrl2: u8,
+        ctrl3: u8,
+        ctrl7: u8,
+    ) -> Result<(), Error<IO::Error>> {
+        self.io.write_register(registers::CTRL2, ctrl2)?;
+        self.io.write_register(registers::CTRL3, ctrl3)?;
+        self.io.write_register(registers::CTRL7, ctrl7)?;
+        Ok(())
+    }
+}
+
+pub(crate) const fn axes(buf: &[u8; 6]) -> [i16; 3] {
+    [
+        i16::from_le_bytes([buf[0], buf[1]]),
+        i16::from_le_bytes([buf[2], buf[3]]),
+        i16::from_le_bytes([buf[4], buf[5]]),
+    ]
 }

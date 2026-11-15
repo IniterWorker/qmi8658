@@ -1,15 +1,16 @@
 [package]
 name = "qmi8658"
 categories = ["embedded", "no-std"]
-version = "0.1.0"
-edition = "2021"
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.85"
 authors = ["Walter Bonetti <walter.bonetti@epitech.eu>"]
 license = "MIT OR Apache-2.0"
-description = "QMI8658 Sensor/Gyroscope"
+description = "QMI8658 6-axis IMU driver for embedded-hal (blocking and async, I2C and SPI)"
 keywords = ["no-std", "qmi8658", "embedded", "embedded-hal-driver", "sensor"]
 include = [
     "src/**/*.rs",
-    "crates-io.md",
+    "CHANGELOG.md",
     "README.md",
     "LICENSE-APACHE",
     "LICENSE-MIT",
@@ -17,22 +18,27 @@ include = [
 repository = "https://github.com/IniterWorker/qmi8658"
 readme = "README.md"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [package.metadata.docs.rs]
+all-features = true
+default-target = "thumbv7em-none-eabihf"
 targets = ["thumbv7m-none-eabi", "thumbv7em-none-eabihf"]
 
 [dependencies]
-# Embedded HAL abstraction
-# We use this layer to abstract hardware i2c/spi
-embedded-hal = { version = "1.0.0" }
-bitfield = "0.15.0"
+embedded-hal = { version = "1.0" }
+embedded-hal-async = { version = "1.0", optional = true }
+defmt = { version = "1", optional = true }
 log = { version = "0.4", default-features = false, optional = true }
-libm = { version = "0.2" }
 
 [features]
 default = []
-loglib = ["log"]
+async = ["dep:embedded-hal-async"]
+defmt = ["dep:defmt"]
+log = ["dep:log"]
+
+[dev-dependencies]
+embedded-hal-mock = { version = "0.11", features = ["embedded-hal-async"] }
+futures = "0.3"
+embedded-hal-bus = { version = "0.3", features = ["async"] }
 
 [dev-dependencies.cargo-husky]
 version = "1"
