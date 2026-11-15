@@ -61,12 +61,15 @@ The blocking driver is always available.
 
 ### Silicon variants
 
-Pedometer and Wake-on-Motion exist on the C variant; the ±2048 dps
-gyro range and the CTRL1 interrupt-pin enable bits exist on the
-A/B variants. All features are exposed unconditionally; commands
-the silicon does not implement fail with
-[`Error::CommandTimeout`]. The revision ID is reported verbatim,
-never asserted.
+Pedometer and Wake-on-Motion are documented as C-variant features;
+the ±2048 dps gyro range and the CTRL1 interrupt-pin enable bits
+as A/B-variant features. All features are exposed
+unconditionally; commands the silicon does not implement fail
+with [`Error::CommandTimeout`]. The revision ID is reported
+verbatim, never asserted. Hardware-verified example: the part on
+the ESP32-S3 reference board reports revision `0x7C` yet accepts
+and runs the pedometer configuration, so do not gate features on
+the revision byte.
 
 SPI support is verified by transaction-level mock tests; the
 reference board used for hardware testing wires the sensor over
