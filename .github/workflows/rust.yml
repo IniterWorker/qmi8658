@@ -8,36 +8,28 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
-    name: Build Driver
+  flake-check:
+    name: Nix Flake Check
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        action:
-          - command: build
-            args: --release
-          - command: fmt
-            args: --all -- --check --color always
-          - command: clippy
-            args: --all-targets --all-features --workspace -- -D warnings
-          - command: test
-            args: --verbose
-
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
 
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-          components: clippy, rustfmt
-          targets: thumbv7em-none-eabihf
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
 
-      - name: Enable caching
-        uses: Swatinem/rust-cache@v2
+      - name: Run flake checks
+        run: nix flake check
 
-      - name: Run command
-        run: cargo ${{ matrix.action.command }} ${{ matrix.action.args }}
+  ci:
+    name: Driver CI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
 
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Run just ci in dev shell
+        run: nix develop -c just ci
