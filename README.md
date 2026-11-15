@@ -18,12 +18,28 @@ measurement unit: blocking and async APIs over I2C and SPI, built on
 | Async (`embedded-hal-async`, feature `async`) | yes | yes |
 
 Features: FIFO (bypass/FIFO/stream), tap and any/no/significant-motion
-engines, pedometer and Wake-on-Motion (C variant), host delta offsets,
-gyro calibration-on-demand, accel/gyro self-tests, SyncSample
-data locking, `defmt` and `log` integrations behind features.
+engines, pedometer and Wake-on-Motion (documented as C-variant
+features), host delta offsets, gyro calibration-on-demand,
+accel/gyro self-tests, SyncSample data locking, `defmt` and `log`
+integrations behind features.
 
 SPI is verified by transaction-level mock tests; hardware testing uses
 an ESP32-S3 board whose IMU is wired over I2C.
+
+## Install
+
+```toml
+[dependencies]
+qmi8658 = "0.2"
+```
+
+Async API and logging integrations are opt-in features:
+
+```toml
+qmi8658 = { version = "0.2", features = ["async", "defmt"] }
+```
+
+MSRV: Rust 1.85 (edition 2024).
 
 ## Open-To-Idea
 
@@ -84,6 +100,7 @@ hardware, pass your HAL's I2C and delay types instead.
 use embedded_hal_mock::eh1::{delay::NoopDelay, i2c::{Mock, Transaction}};
 use qmi8658::{DeviceAddress, Qmi8658, config::Config};
 
+// `script` holds the mock I2C transaction script (elided here).
 let mut imu = Qmi8658::new_i2c(Mock::new(&script), DeviceAddress::Primary, NoopDelay {});
 imu.init(Config::default()).unwrap();
 let sample = imu.read_sample().unwrap();
@@ -104,6 +121,23 @@ let mut imu = Qmi8658Async::new_i2c(i2c, DeviceAddress::Primary, delay);
 imu.init(Config::default()).await?;
 let sample = imu.read_sample().await?;
 ```
+
+## Development
+
+A reproducible development environment is provided as a Nix flake
+(stable Rust with clippy/rustfmt/rust-analyzer, `thumbv7em`,
+`thumbv7m`, and `riscv32imc` stdlibs for the `no_std` cross checks,
+`just`, `cargo-hack`, and `cargo-readme`):
+
+```sh
+nix develop        # or: direnv allow (uses .envrc)
+just ci            # fmt, clippy, all-feature tests, cross-target checks, docs, README
+```
+
+`nix flake check` builds the crate and runs the host test suites
+with all features in the Nix sandbox. Without Nix, `just ci` only
+needs a stable Rust toolchain with the targets above plus
+`cargo-hack` and `cargo-readme`.
 
 ## License
 

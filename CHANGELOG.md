@@ -4,8 +4,6 @@ Rust `no_std` driver for the QMI8658 6-axis inertial measurement unit.
 
 <!-- next-header -->
 
-## [Unreleased] - ReleaseDate
-
 ## [0.2.0] - 2026-11-15
 
 Complete rewrite of the driver (breaking).
@@ -30,6 +28,11 @@ Complete rewrite of the driver (breaking).
   and a public `registers` module with the register map.
 - Nix flake development environment with a sandboxed host-test
   check; CI runs `nix flake check` and `just ci`.
+- Hardware-verified on an ESP32-S3 board (I2C): samples, FIFO,
+  self-tests, calibration-on-demand, pedometer, Embassy async.
+  Handles the silicon gyro self-test quirks (needs reset
+  full-scale/ODR fields; first trigger after an accel self-test
+  can be dropped, so it retries once).
 
 ### Changed
 
@@ -52,3 +55,6 @@ Complete rewrite of the driver (breaking).
   and its retry budget is reset between the done/ack phases.
 - No `unsafe` transmutation or panics on unknown register encodings;
   reserved values are masked to documented variants.
+
+[unreleased]: https://github.com/IniterWorker/qmi8658/compare/0.2.0...HEAD
+[0.2.0]: https://github.com/IniterWorker/qmi8658/releases/tag/0.2.0

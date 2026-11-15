@@ -71,6 +71,7 @@
 //! #     Transaction::write(0x6A, vec![0x08, 0x03]),
 //! #     Transaction::write_read(0x6A, vec![0x30], block),
 //! # ];
+//! // `script` holds the mock I2C transaction script (elided here).
 //! let mut imu = Qmi8658::new_i2c(Mock::new(&script), DeviceAddress::Primary, NoopDelay {});
 //! imu.init(Config::default()).unwrap();
 //! let sample = imu.read_sample().unwrap();
