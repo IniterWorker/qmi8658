@@ -268,3 +268,40 @@ fn device_id_uses_single_reads() {
     assert_eq!(id.revision, 0x68);
     finish(imu);
 }
+
+#[test]
+fn gyro_self_test_retries_dropped_first_trigger() {
+    // Hardware quirk: the first gST trigger (notably after an accel
+    // self-test) never signals; the driver clears gST and re-triggers.
+    let mut script = init_script();
+    script.extend([
+        read(0x03, &[0x15]),
+        read(0x04, &[0x55]),
+        read(0x08, &[0x03]),
+        write(0x08, 0x00),
+        write(0x04, 0x80),
+    ]);
+    // 700 ms budget at 5 ms cadence: polls at 0,5,...,700 ms.
+    for _ in 0..=140 {
+        script.push(read(0x2D, &[0x00]));
+    }
+    script.extend([
+        write(0x04, 0x00), // clear gST
+        write(0x04, 0x80), // re-trigger
+        read(0x2D, &[0x01]),
+        write(0x04, 0x00),
+        read(0x2D, &[0x00]),
+    ]);
+    let mut dvx = vec![0u8; 6];
+    for i in 0..3 {
+        dvx[i * 2..i * 2 + 2].copy_from_slice(&16000i16.to_le_bytes()); // 1000 dps each
+    }
+    script.push(read(0x51, &dvx));
+    script.extend([write(0x03, 0x15), write(0x04, 0x55), write(0x08, 0x03)]);
+    let mut imu = driver(script);
+    imu.init(Config::default()).unwrap();
+    let report = imu.self_test_gyro().unwrap();
+    assert!(report.passed);
+    assert!((report.delta[0] - 1000.0).abs() < 1e-6);
+    finish(imu);
+}

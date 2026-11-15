@@ -760,7 +760,27 @@ where
                 ..Ctrl3::default()
             };
             self.io.write_register(registers::CTRL3, test.to_bits())?;
-            self.wait_statusint_avail(true, 1000)?;
+            match self.wait_statusint_avail(true, 700) {
+                Ok(()) => {}
+                Err(Error::CommandTimeout) => {
+                    // Silicon quirk (hardware-verified): the first
+                    // gST trigger after an accelerometer self-test is
+                    // silently dropped; a second trigger runs within
+                    // ~300 ms. Clear and trigger once more.
+                    self.io.write_register(
+                        registers::CTRL3,
+                        Ctrl3 {
+                            self_test: false,
+                            ..test
+                        }
+                        .to_bits(),
+                    )?;
+                    self.delay.delay_ms(10);
+                    self.io.write_register(registers::CTRL3, test.to_bits())?;
+                    self.wait_statusint_avail(true, 1000)?;
+                }
+                Err(e) => return Err(e),
+            }
             self.io.write_register(
                 registers::CTRL3,
                 Ctrl3 {

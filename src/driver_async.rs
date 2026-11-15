@@ -774,7 +774,28 @@ where
             self.io
                 .write_register(registers::CTRL3, test.to_bits())
                 .await?;
-            self.wait_statusint_avail(true, 1000).await?;
+            match self.wait_statusint_avail(true, 700).await {
+                Ok(()) => {}
+                Err(Error::CommandTimeout) => {
+                    // First-trigger-dropped quirk; see blocking driver.
+                    self.io
+                        .write_register(
+                            registers::CTRL3,
+                            Ctrl3 {
+                                self_test: false,
+                                ..test
+                            }
+                            .to_bits(),
+                        )
+                        .await?;
+                    self.delay.delay_ms(10).await;
+                    self.io
+                        .write_register(registers::CTRL3, test.to_bits())
+                        .await?;
+                    self.wait_statusint_avail(true, 1000).await?;
+                }
+                Err(e) => return Err(e),
+            }
             self.io
                 .write_register(
                     registers::CTRL3,
